@@ -207,6 +207,10 @@ static func run_all() -> Dictionary:
 	for keystore_result in AIAPIKeyStoreTest.run_all():
 		results.append(keystore_result)
 
+	# --- PHASE 29: Pilot Cell Canlı Köprü (Aşama 4a) ---
+	for live_bridge_result in AIAgentLiveBridgeTest.run_all():
+		results.append(live_bridge_result)
+
 	return _build_report(results)
 
 
