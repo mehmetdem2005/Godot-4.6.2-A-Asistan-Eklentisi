@@ -1,0 +1,5 @@
+# Godot import/cache — koda dahil değil, üretilir
+.godot/
+*.import
+# Eklenti çalışma zamanı verisi
+user_data/

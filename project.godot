@@ -1,0 +1,20 @@
+; ai-asistann — Godot 4.6.2 otonom AI oyun-geliştirme eklentisi
+; Bu proje dosyası testleri ve eklentileri headless koşturmak için
+; üretilmiştir. Renderer: Forward Mobile (Android hedef — devir kısıtı).
+
+config_version=5
+
+[application]
+
+config/name="ai-asistann"
+config/features=PackedStringArray("4.6", "Mobile")
+run/main_scene=""
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/ai_contract_tests/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
