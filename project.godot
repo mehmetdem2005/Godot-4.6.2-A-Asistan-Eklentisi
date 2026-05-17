@@ -12,7 +12,7 @@ run/main_scene=""
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/ai_contract_tests/plugin.cfg")
+enabled=PackedStringArray("res://addons/ai_assistant/plugin.cfg", "res://addons/ai_contract_tests/plugin.cfg")
 
 [rendering]
 

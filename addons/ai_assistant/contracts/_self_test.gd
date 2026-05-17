@@ -219,6 +219,10 @@ static func run_all() -> Dictionary:
 	for e2e_result in AIPipelineOrchestratorTest.run_all():
 		results.append(e2e_result)
 
+	# --- PHASE 32: Ana Panel Kontrolcü (Aşama 5) ---
+	for panel_result in AIMainPanelControllerTest.run_all():
+		results.append(panel_result)
+
 	return _build_report(results)
 
 
