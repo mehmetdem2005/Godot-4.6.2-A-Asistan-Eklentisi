@@ -211,6 +211,10 @@ static func run_all() -> Dictionary:
 	for live_bridge_result in AIAgentLiveBridgeTest.run_all():
 		results.append(live_bridge_result)
 
+	# --- PHASE 30: Hata ↔ Bellek Köprüsü (Aşama 4b) ---
+	for dbg_mem_result in AIDebugMemoryBridgeTest.run_all():
+		results.append(dbg_mem_result)
+
 	return _build_report(results)
 
 
