@@ -215,6 +215,10 @@ static func run_all() -> Dictionary:
 	for dbg_mem_result in AIDebugMemoryBridgeTest.run_all():
 		results.append(dbg_mem_result)
 
+	# --- PHASE 31: Uçtan Uca Orkestratör (Aşama 4c) ---
+	for e2e_result in AIPipelineOrchestratorTest.run_all():
+		results.append(e2e_result)
+
 	return _build_report(results)
 
 
