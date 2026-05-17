@@ -207,6 +207,22 @@ static func run_all() -> Dictionary:
 	for keystore_result in AIAPIKeyStoreTest.run_all():
 		results.append(keystore_result)
 
+	# --- PHASE 29: Pilot Cell Canlı Köprü (Aşama 4a) ---
+	for live_bridge_result in AIAgentLiveBridgeTest.run_all():
+		results.append(live_bridge_result)
+
+	# --- PHASE 30: Hata ↔ Bellek Köprüsü (Aşama 4b) ---
+	for dbg_mem_result in AIDebugMemoryBridgeTest.run_all():
+		results.append(dbg_mem_result)
+
+	# --- PHASE 31: Uçtan Uca Orkestratör (Aşama 4c) ---
+	for e2e_result in AIPipelineOrchestratorTest.run_all():
+		results.append(e2e_result)
+
+	# --- PHASE 32: Ana Panel Kontrolcü (Aşama 5) ---
+	for panel_result in AIMainPanelControllerTest.run_all():
+		results.append(panel_result)
+
 	return _build_report(results)
 
 

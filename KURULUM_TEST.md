@@ -26,7 +26,36 @@ gdlint.py             ← GDScript statik analiz aracı (13 kural)
 gdlint_selftest.py    ← linter'ın kendi öz-testi
 ```
 
-Toplam **269 GDScript dosyası**, **717 otomatik test**.
+Toplam **299 GDScript dosyası**, **749 otomatik test** (gerçek
+Godot 4.6.2 headless'ta doğrulandı).
+
+## AŞAMA DURUMU (Claude Code sandbox doğrulaması)
+
+Devir belgesinin yol haritası tamamlandı ve GERÇEK ortamda kanıtlandı:
+
+```
+[✓] Aşama 0-1  Godot 4.6.2 kuruldu; gdlint 0 hata; 749/749 test geçti
+[✓] Aşama 3    ADIM 1: GERÇEK DeepSeek çağrısı (ok=true, ~1.1s)
+[✓] Aşama 4a   Pilot Cell ↔ Router canlı köprüsü (ajan gerçek üretti)
+[✓] Aşama 4b   Hata ↔ Bellek köprüsü
+[✓] Aşama 4c   Uçtan uca: görev→LLM→verify→HITL→Executor diske YAZDI
+[✓] Aşama 5    Ana eklenti + görünür panel (plugin.cfg/plugin.gd)
+```
+
+"Bitti" tablosu: #6 #7 #8 kanıtlandı; #1-5 panel kuruldu, görsel
+doğrulama kullanıcıya (telefonda Godot) bırakıldı.
+
+### Ana "AI Asistan" panelini açma
+
+1. **Project > Project Settings > Plugins**
+2. **"AI Asistan"** satırında **Enable**
+3. Sol dock'ta (üst-sağ yuva) **"AI Asistan"** paneli belirir
+4. Panelde: DeepSeek anahtarını gir + Kaydet → "Canlı mod"u işaretle
+   → Görev yaz (örn. "ekrana merhaba yazan script üret") → **▶ Üret
+   ve Uygula**. Sistem üretir, doğrular, HITL'den geçirir, uygular.
+
+Headless test koşumu (geliştirici): `godot --headless --path .
+--script res://tools/headless_test_runner.gd` → 749/749 beklenir.
 
 ## Kurulum (Android Godot 4.6)
 
