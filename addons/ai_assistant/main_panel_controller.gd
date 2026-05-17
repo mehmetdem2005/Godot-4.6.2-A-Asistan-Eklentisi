@@ -10,7 +10,7 @@ extends RefCounted
 ## ayarlar çalışır" maddeleri yapısal olarak imkânsızdı.
 ##
 ## ÇÖZÜM: Panelin tüm KARAR mantığını tutan saf RefCounted kontrolcü.
-## Görsel Control (main_dock.gd) ince bir kabuktur, mantık burada —
+## Görsel Control (ai_studio_screen.gd) ince kabuktur, mantık burada —
 ## böylece panel davranışı sahnesiz test edilebilir (proje disiplini:
 ## her şey taranır/test edilir).
 ##
@@ -27,18 +27,31 @@ extends RefCounted
 
 const PROVIDER: String = "deepseek"
 
+## Kullanıcının seçebileceği DeepSeek modelleri (Ayarlar görünümü).
+const ALLOWED_MODELS: Array = ["deepseek-chat", "deepseek-reasoner"]
+
 var settings: AISettingsModel = null
 var state: AIWorkspaceState = null
+var memory_manager: AIMemoryManager = null
+var sync_queue: AIOfflineSyncQueue = null
 var _key_store: AIAPIKeyStore = null
 var _status: String = "Hazır"
 var _last_result: Dictionary = {}
+var _model: String = "deepseek-chat"
+var _feed: AIFeedEmitter = null
+var _feed_model: AILiveFeedModel = null
 
 
 func _init() -> void:
 	settings = AISettingsModel.new()
 	state = AIWorkspaceState.new()
+	memory_manager = AIMemoryManager.new()
+	sync_queue = AIOfflineSyncQueue.new()
 	_key_store = AIAPIKeyStore.new()
 	_key_store.load_from_disk()
+	_feed = AIFeedEmitter.new()
+	_feed_model = AILiveFeedModel.new()
+	_feed_model.attach_to(_feed)
 
 
 # ============================================================
@@ -73,6 +86,63 @@ func resolve_api_key() -> Dictionary:
 ## Canlı modu ayarlar (Ayarlar sekmesi anahtarı).
 func set_live_mode(value: bool) -> void:
 	settings.set_live_mode(value)
+
+
+## Yapay zeka modelini ayarlar. İzinli liste dışı → reddedilir (false).
+func set_model(model_id: String) -> bool:
+	if not ALLOWED_MODELS.has(model_id):
+		push_warning("MainPanelController: geçersiz model %s" % model_id)
+		return false
+	_model = model_id
+	return true
+
+
+## Seçili model adı.
+func model_name() -> String:
+	return _model
+
+
+# ============================================================
+# KONUŞMA LOG'U — sohbet ekranı (#2 izlenebilirlik)
+# ============================================================
+
+## Sohbete bir mesaj ekler. role: "user" | "assistant" | "system".
+func add_message(role: String, text: String) -> void:
+	var sev: int = AIFeedEvent.Severity.INFO
+	_feed.emit_event("CHAT", text, role, sev)
+
+
+## Sohbet mesajları — UI çizer. [{role, text}] (en eski → en yeni).
+func messages() -> Array:
+	var out: Array = []
+	for e in _feed_model.visible_events():
+		var ev: AIFeedEvent = e
+		out.append({"role": ev.owner_role, "text": ev.message})
+	return out
+
+
+## Sohbet olay yayıncısı — workspace Canlı Akış sekmesi buna bağlanır.
+func feed() -> AIFeedEmitter:
+	return _feed
+
+
+# ============================================================
+# SİSTEM SIFIRLAMA — Ayarlar (working + kuyruk temizlenir)
+# ============================================================
+
+## Çalışma belleğini ve senkron kuyruğunu sıfırlar. Episodic /
+## procedural KORUNUR (Aşama 4b hata↔bellek köprüsü onlara dayanır).
+## Dönen: {ok, working_cleared, queue_cleared, message}
+func reset_memory_and_queue() -> Dictionary:
+	memory_manager.working.clear()
+	sync_queue.clear()
+	_status = "✓ Hafıza (çalışma) ve kuyruk sıfırlandı"
+	return {
+		"ok": true,
+		"working_cleared": memory_manager.working.count() == 0,
+		"queue_cleared": sync_queue.size() == 0,
+		"message": _status,
+	}
 
 
 # ============================================================
@@ -173,4 +243,5 @@ func summary() -> Dictionary:
 		"has_key": has_api_key(),
 		"active_tab": active_tab_name(),
 		"automation": settings.automation_name(),
+		"model": _model,
 	}

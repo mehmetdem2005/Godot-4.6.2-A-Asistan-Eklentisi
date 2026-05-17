@@ -20,6 +20,12 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Görev", _test_target_path()))
 	results.append(_b("Panel: Sekme", _test_nine_tabs()))
 	results.append(_b("Panel: Durum", _test_status_and_result()))
+	results.append(_b("Panel: Model", _test_model_default()))
+	results.append(_b("Panel: Model", _test_model_valid_set()))
+	results.append(_b("Panel: Model", _test_model_invalid_rejected()))
+	results.append(_b("Panel: Sohbet", _test_chat_log()))
+	results.append(_b("Panel: Sıfırla", _test_reset_clears_working_queue()))
+	results.append(_b("Panel: Sıfırla", _test_reset_preserves_episodic()))
 	return results
 
 
@@ -149,4 +155,96 @@ static func _test_status_and_result() -> Dictionary:
 	c.record_result({"ok": false, "stage": "verify", "message": "hata"})
 	if not c.status_text().contains("✗"):
 		return _fail(name, "başarısızlık ✗ yansımalı")
+	return _ok(name)
+
+
+# ============================================================
+# MODEL SEÇİMİ (Plan B — Ayarlar)
+# ============================================================
+
+static func _test_model_default() -> Dictionary:
+	var name := "Varsayılan model deepseek-chat"
+	var c := _c()
+	if c.model_name() != "deepseek-chat":
+		return _fail(name, "varsayılan deepseek-chat olmalı: " +
+			c.model_name())
+	return _ok(name)
+
+
+static func _test_model_valid_set() -> Dictionary:
+	var name := "Geçerli model ayarlanır"
+	var c := _c()
+	if not c.set_model("deepseek-reasoner"):
+		return _fail(name, "izinli model kabul edilmeli")
+	if c.model_name() != "deepseek-reasoner":
+		return _fail(name, "model güncellenmedi")
+	return _ok(name)
+
+
+static func _test_model_invalid_rejected() -> Dictionary:
+	var name := "Geçersiz model reddedilir"
+	var c := _c()
+	if c.set_model("gpt-4"):
+		return _fail(name, "izinsiz model kabul edilmemeli")
+	if c.model_name() != "deepseek-chat":
+		return _fail(name, "ret sonrası model değişmemeli")
+	return _ok(name)
+
+
+# ============================================================
+# SOHBET LOG'U (Plan B — Sohbet ekranı)
+# ============================================================
+
+static func _test_chat_log() -> Dictionary:
+	var name := "Sohbet mesajları eklenir ve sıralı listelenir"
+	var c := _c()
+	c.add_message("user", "merhaba")
+	c.add_message("assistant", "selam")
+	var msgs: Array = c.messages()
+	if msgs.size() != 2:
+		return _fail(name, "2 mesaj bekleniyor, %d" % msgs.size())
+	if str(msgs[0]["role"]) != "user" or str(msgs[0]["text"]) != "merhaba":
+		return _fail(name, "ilk mesaj kullanıcı/merhaba olmalı")
+	if str(msgs[1]["role"]) != "assistant":
+		return _fail(name, "ikinci mesaj asistan olmalı")
+	return _ok(name)
+
+
+# ============================================================
+# SİSTEM SIFIRLAMA (Plan B — working+kuyruk temizlenir,
+# episodic/procedural korunur — Aşama 4b köprüsü)
+# ============================================================
+
+static func _test_reset_clears_working_queue() -> Dictionary:
+	var name := "Sıfırla working belleği ve kuyruğu temizler"
+	var c := _c()
+	c.memory_manager.working.add_content("geçici düşünce")
+	c.sync_queue.enqueue("op1", "SYNC", {"x": 1}, 1000)
+	if c.memory_manager.working.count() == 0:
+		return _fail(name, "ön koşul: working dolu olmalı")
+	if c.sync_queue.size() == 0:
+		return _fail(name, "ön koşul: kuyruk dolu olmalı")
+	var r: Dictionary = c.reset_memory_and_queue()
+	if not bool(r["ok"]):
+		return _fail(name, "sıfırlama ok dönmeli")
+	if c.memory_manager.working.count() != 0:
+		return _fail(name, "working temizlenmeli")
+	if c.sync_queue.size() != 0:
+		return _fail(name, "kuyruk temizlenmeli")
+	return _ok(name)
+
+
+static func _test_reset_preserves_episodic() -> Dictionary:
+	var name := "Sıfırla episodic/procedural'ı KORUR (4b köprüsü)"
+	var c := _c()
+	c.memory_manager.episodic.add_content("çözülmüş hata kaydı")
+	c.memory_manager.procedural.add_content("öğrenilmiş prosedür")
+	c.memory_manager.working.add_content("geçici")
+	c.reset_memory_and_queue()
+	if c.memory_manager.episodic.count() != 1:
+		return _fail(name, "episodic korunmalı")
+	if c.memory_manager.procedural.count() != 1:
+		return _fail(name, "procedural korunmalı")
+	if c.memory_manager.working.count() != 0:
+		return _fail(name, "working yine de temizlenmeli")
 	return _ok(name)
