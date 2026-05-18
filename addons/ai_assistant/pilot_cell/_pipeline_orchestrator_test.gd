@@ -41,7 +41,105 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Cerrahi", _test_surgical_patch_applies()))
 	results.append(_b("E2E: Cerrahi", _test_surgical_reject_no_match()))
 	results.append(_b("E2E: Cerrahi", _test_surgical_missing_file()))
+	results.append(_b("E2E: Editör", _test_directive_parse_maps()))
+	results.append(_b("E2E: Editör", _test_directive_parse_honest_errors()))
+	results.append(_b("E2E: Editör", _test_directive_no_marker_passthrough()))
+	results.append(_b("E2E: Editör", _test_editor_actions_skip_no_editor()))
+	results.append(_b("E2E: Editör", _test_editor_actions_bad_plan_fail()))
 	return results
+
+
+# ============================================================
+# EDİTÖR DİREKTİFİ — LLM → editör mutasyon köprüsü (Parça 3)
+# ============================================================
+
+static func _test_directive_parse_maps() -> Dictionary:
+	var name := "Direktif ayrıştırma: JSON → doğru ActionSpec tipi+param"
+	var p := AIEditorDirectiveParser.new()
+	var txt := (
+		"Tamam, ekliyorum.\nEDITOR_ACTIONS\n```json\n"
+		+ "[{\"action\":\"node_add\",\"parent\":\".\","
+		+ "\"node_type\":\"Sprite2D\",\"node_name\":\"Player\"},"
+		+ "{\"action\":\"script_attach\",\"node_path\":\"Player\","
+		+ "\"script_path\":\"res://game/scripts/p.gd\"}]\n```\n"
+	)
+	var r: Dictionary = p.parse(txt)
+	if not bool(r["is_editor"]) or not str(r["error"]).is_empty():
+		return _fail(name, "geçerli direktif tanınmadı: " + str(r["error"]))
+	var acts: Array = r["actions"]
+	if acts.size() != 2:
+		return _fail(name, "2 işlem beklendi: %d" % acts.size())
+	if int(acts[0]["action_type"]) != AIActionSpec.ActionType.NODE_ADD:
+		return _fail(name, "ilk işlem NODE_ADD olmalı")
+	if str(acts[0]["params"]["node_type"]) != "Sprite2D":
+		return _fail(name, "node_type aktarılmadı")
+	if int(acts[1]["action_type"]) != AIActionSpec.ActionType.SCRIPT_ATTACH:
+		return _fail(name, "ikinci işlem SCRIPT_ATTACH olmalı")
+	return _ok(name)
+
+
+static func _test_directive_parse_honest_errors() -> Dictionary:
+	var name := "Direktif: bozuk JSON / bilinmeyen action dürüst hata"
+	var p := AIEditorDirectiveParser.new()
+	var bad_json: Dictionary = p.parse(
+		"EDITOR_ACTIONS\n```json\n[not valid json}\n```"
+	)
+	var unknown: Dictionary = p.parse(
+		"EDITOR_ACTIONS\n```json\n[{\"action\":\"explode\"}]\n```"
+	)
+	if not bool(bad_json["is_editor"]) or str(bad_json["error"]).is_empty():
+		return _fail(name, "bozuk JSON dürüst hata vermeli")
+	if str(unknown["error"]).is_empty():
+		return _fail(name, "bilinmeyen action reddedilmeli")
+	return _ok(name)
+
+
+static func _test_directive_no_marker_passthrough() -> Dictionary:
+	var name := "İşaret yoksa normal kod hattına bırakılır (regresyon yok)"
+	var p := AIEditorDirectiveParser.new()
+	var r: Dictionary = p.parse(
+		"```gdscript\nextends Node\n```"
+	)
+	if bool(r["is_editor"]):
+		return _fail(name, "işaretsiz içerik editör sanılmamalı")
+	return _ok(name)
+
+
+static func _test_editor_actions_skip_no_editor() -> Dictionary:
+	var name := (
+		"Editör direktifi: editör yokken dürüst başarısız "
+		+ "(SAHTE 'yapıldı' yok)"
+	)
+	var o := _new()
+	var txt := (
+		"EDITOR_ACTIONS\n```json\n[{\"action\":\"node_add\","
+		+ "\"node_type\":\"Node2D\",\"node_name\":\"Player\"}]\n```"
+	)
+	var r: Dictionary = o._dispatch_output("(yok)", txt, "SceneEngineer")
+	o.free()
+	if str(r["stage"]) != "editor":
+		return _fail(name, "editor aşaması beklenir: " + str(r["stage"]))
+	if bool(r["ok"]):
+		return _fail(name, "editör yokken ok=true SAHTE başarı olur")
+	if int(r.get("skipped", 0)) != 1:
+		return _fail(name, "1 işlem atlanmalıydı (editör dışı)")
+	return _ok(name)
+
+
+static func _test_editor_actions_bad_plan_fail() -> Dictionary:
+	var name := "Editör direktifi: geçersiz node tipi FAIL (mock policy)"
+	var o := _new()
+	var txt := (
+		"EDITOR_ACTIONS\n```json\n[{\"action\":\"node_add\","
+		+ "\"node_type\":\"Notreal__Xyz\",\"node_name\":\"A\"}]\n```"
+	)
+	var r: Dictionary = o._dispatch_output("(yok)", txt, "SceneEngineer")
+	o.free()
+	if bool(r["ok"]) or str(r["stage"]) != "editor":
+		return _fail(name, "geçersiz plan editör aşamasında FAIL olmalı")
+	if int(r.get("failed", 0)) != 1:
+		return _fail(name, "1 işlem başarısız olmalıydı")
+	return _ok(name)
 
 
 # ============================================================

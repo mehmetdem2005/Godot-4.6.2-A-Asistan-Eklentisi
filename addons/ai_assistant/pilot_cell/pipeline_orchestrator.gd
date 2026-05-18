@@ -245,6 +245,88 @@ func apply_generated_code(
 	return out
 
 
+## Çıktı yönlendirici: LLM çıktısı bir EDITOR_ACTIONS direktifi mi,
+## yoksa dosya kodu mu? Parça 3 köprüsü — editör mutasyonları (node
+## ekle/sil, property, script, ayar) artık LLM'den tetiklenebilir.
+func _dispatch_output(
+	target_path: String, raw_content: String, role_name: String
+) -> Dictionary:
+	var dp := AIEditorDirectiveParser.new()
+	var pr: Dictionary = dp.parse(raw_content)
+	if bool(pr["is_editor"]):
+		return apply_editor_actions(pr, role_name)
+	return apply_generated_code(target_path, raw_content, role_name)
+
+
+## Doğrulanmış editör direktiflerini HITL kapısından geçirip
+## Executor ile GERÇEKTEN uygular. SENKRON çekirdek — test edilebilir.
+## Mock policy: direktif bozuksa / hepsi editör dışında SKIP olursa
+## SAHTE başarı YOK; dürüst aşama-bazlı sonuç döner.
+func apply_editor_actions(pr: Dictionary, role_name: String) -> Dictionary:
+	if not str(pr["error"]).is_empty():
+		return _stage(
+			"editor", false, "Editör direktifi hatası: " + str(pr["error"])
+		)
+	var actions: Array = pr["actions"]
+	if actions.is_empty():
+		return _stage("editor", false, "Editör direktifi: işlem yok")
+
+	_executor.initialize()
+	var applied: int = 0
+	var skipped: int = 0
+	var failed: int = 0
+	var notes: PackedStringArray = PackedStringArray()
+	for a in actions:
+		var spec := AIActionSpec.create(
+			int(a["action_type"]), "(editor)", role_name
+		)
+		spec.params = a["params"]
+		var label: String = "EDITOR: " + spec.action_type_name()
+		var gate: Dictionary = _hitl.gate_action(spec, label, "")
+		if not bool(gate["cleared"]):
+			var d: Dictionary = _stage(
+				"hitl", false,
+				"İnsan onayı bekleniyor (%s): %s" % [
+					spec.action_type_name(), str(gate["reason"])
+				]
+			)
+			d["needs_approval"] = true
+			d["risk_level"] = int(gate["risk_level"])
+			d["applied"] = applied
+			return d
+		var node := AIPlanNode.create(
+			AIPlanNode.Level.ACTION, label
+		)
+		var res: AIVerificationResult = _executor.execute_action(node, spec)
+		match res.outcome:
+			AIVerificationResult.Outcome.PASS, \
+			AIVerificationResult.Outcome.WARNING:
+				applied += 1
+			AIVerificationResult.Outcome.SKIP:
+				skipped += 1
+			_:
+				failed += 1
+		notes.append("%s: %s" % [spec.action_type_name(), res.message])
+
+	var ok: bool = failed == 0 and applied > 0
+	var msg: String
+	if applied == 0 and skipped > 0:
+		msg = ("Editör işlemleri uygulanamadı — Godot editöründe "
+			+ "çalıştırılmalı (%d atlandı)" % skipped)
+	elif failed == 0:
+		msg = "%d editör işlemi uygulandı" % applied
+	else:
+		msg = "%d uygulandı, %d başarısız, %d atlandı" % [
+			applied, failed, skipped
+		]
+	var out: Dictionary = _stage("editor", ok, msg)
+	out["applied"] = applied
+	out["skipped"] = skipped
+	out["failed"] = failed
+	out["details"] = notes
+	return out
+
+
 ## ASENKRON tam zincir: görev → plan → CANLI LLM → çekirdek.
 ## Sonuç 'pipeline_completed' sinyali ile gelir.
 ## model: boş değilse LLM isteği o modele sabitlenir (UI model seçimi);
@@ -531,7 +613,7 @@ func _on_chain_completed(res: Dictionary) -> void:
 	if str(t["kind"]) != "repair":
 		_spawn_from_architect(res)
 	if bool(res.get("ok", false)):
-		var applied: Dictionary = apply_generated_code(
+		var applied: Dictionary = _dispatch_output(
 			str(t["target_file"]), str(res.get("content", "")),
 			str(res.get("role_name", "CodeEngineer"))
 		)
@@ -685,7 +767,7 @@ func _on_thought(thought: Dictionary) -> void:
 		)
 		_emit_done(chat)
 		return
-	var result: Dictionary = apply_generated_code(
+	var result: Dictionary = _dispatch_output(
 		_active_path, str(thought.get("content", "")),
 		_active_role_name
 	)
