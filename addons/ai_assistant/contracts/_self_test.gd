@@ -924,16 +924,16 @@ static func _test_provider_request_roundtrip() -> Dictionary:
 
 
 static func _test_provider_request_max_tokens_default() -> Dictionary:
-	var name := "ProviderRequest max_tokens varsayılanı API tavanı (8192)"
+	var name := "ProviderRequest max_tokens varsayılanı yapay sınırsız (100000)"
 	var r := AIProviderRequest.create(
 		AIProviderRequest.Purpose.CODE, "CodeEngineer"
 	)
-	if r.max_tokens != 8192:
-		return _fail(name, "varsayılan 8192 olmalı: %d" % r.max_tokens)
+	if r.max_tokens != 100000:
+		return _fail(name, "varsayılan 100000 olmalı: %d" % r.max_tokens)
 	var r2 := AIProviderRequest.new()
 	r2.from_dict({})
-	if r2.max_tokens != 8192:
-		return _fail(name, "from_dict varsayılanı 8192 olmalı: %d"
+	if r2.max_tokens != 100000:
+		return _fail(name, "from_dict varsayılanı 100000 olmalı: %d"
 			% r2.max_tokens)
 	return _ok(name)
 

@@ -22,7 +22,46 @@ static func run_all() -> Array:
 	results.append(_b("Chain: Köprü", _test_no_bridge_honest()))
 	results.append(_b("Chain: Köprü", _test_no_router_honest()))
 	results.append(_b("Chain: Model", _test_code_model_is_chat()))
+	results.append(_b("Chain: Bölünme", _test_join_clean_strips_fences()))
+	results.append(_b("Chain: Bölünme", _test_tail_keeps_end()))
+	results.append(_b("Chain: Bölünme", _test_chunk_bound()))
 	return results
+
+
+static func _test_join_clean_strips_fences() -> Dictionary:
+	var name := "Parça birleştirme ``` çitlerini söker (kesintisiz kod)"
+	var r := _new()
+	var raw := "```gdscript\nextends Node\n```\n```\nfunc f():\n\tpass\n```"
+	var joined: String = r._join_clean(raw)
+	r.free()
+	if joined.contains("```"):
+		return _fail(name, "çit kalmamalı: " + joined)
+	if joined != "extends Node\nfunc f():\n\tpass":
+		return _fail(name, "kod yanlış birleşti: " + joined)
+	return _ok(name)
+
+
+static func _test_tail_keeps_end() -> Dictionary:
+	var name := "_tail uzun metnin sonunu, kısa metni aynen verir"
+	var r := _new()
+	var short_keep: String = r._tail("kisa")
+	var long_text: String = "A".repeat(5000)
+	var tail: String = r._tail(long_text)
+	r.free()
+	if short_keep != "kisa":
+		return _fail(name, "kısa metin korunmalı")
+	if tail.length() != AIRoleChainRunner.CONT_TAIL_CHARS:
+		return _fail(name, "kuyruk uzunluğu yanlış: %d" % tail.length())
+	return _ok(name)
+
+
+static func _test_chunk_bound() -> Dictionary:
+	var name := "Bölünmüş üretim sınırlı (sonsuz döngü yok)"
+	if AIRoleChainRunner.MAX_CODE_CHUNKS < 1:
+		return _fail(name, "en az 1 parça")
+	if AIRoleChainRunner.MAX_CODE_CHUNKS > 12:
+		return _fail(name, "üst sınır makul kalmalı (≤12)")
+	return _ok(name)
 
 
 static func _test_code_model_is_chat() -> Dictionary:

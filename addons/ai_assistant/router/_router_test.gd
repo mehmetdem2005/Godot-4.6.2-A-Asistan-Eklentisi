@@ -19,6 +19,7 @@ static func run_all() -> Array:
 
 	# Adapter — format çevirisi
 	results.append(_b("Router: Adapter", _test_deepseek_body()))
+	results.append(_b("Router: Adapter", _test_deepseek_max_tokens_clamp()))
 	results.append(_b("Router: Adapter", _test_openai_headers()))
 	results.append(_b("Router: Adapter", _test_anthropic_system()))
 	results.append(_b("Router: Adapter", _test_gemini_contents()))
@@ -92,6 +93,21 @@ static func _test_deepseek_body() -> Dictionary:
 		return _fail(name, "system prompt ilk mesaj değil")
 	if body["model"] != "deepseek-chat":
 		return _fail(name, "varsayılan model yanlış")
+	return _ok(name)
+
+
+static func _test_deepseek_max_tokens_clamp() -> Dictionary:
+	var name := "DeepSeek max_tokens API tavanına (8192) güvenle kırpılır"
+	var adapter := AIDeepSeekAdapter.new()
+	var req := _make_request()
+	req.max_tokens = 100000
+	var body: Dictionary = adapter.build_request_body(req)
+	if int(body["max_tokens"]) != AIDeepSeekAdapter.MAX_OUTPUT_TOKENS:
+		return _fail(name, "8192'e kırpılmalı: %d" % int(body["max_tokens"]))
+	# Tavan altı değer aynen korunur (kırpma yalnız aşımda).
+	req.max_tokens = 1000
+	if int(adapter.build_request_body(req)["max_tokens"]) != 1000:
+		return _fail(name, "tavan altı değer korunmalı")
 	return _ok(name)
 
 
