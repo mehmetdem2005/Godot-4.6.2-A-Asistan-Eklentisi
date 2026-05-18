@@ -68,46 +68,6 @@ const GODOT4_API_GUARD: String = (
 	+ "Godot 4.6 GDScript ver (SEARCH/REPLACE değil)."
 )
 
-## AAA EDİTÖR/UI KALİTE SÖZLEŞMESİ — telefon testinde üretilen editör
-## aracı: paneller taşıyor, kaydırma çubuğu yok, viewport'a biniyor,
-## diğer editör docklarını bozuyor. Bu kurallar kod üreten rollere
-## eklenir; üretilen UI/araç profesyonel düzgünlükte olmalı.
-const UI_QUALITY_GUARD: String = (
-	"AAA UI/EDİTÖR KURALLARI (panel bozulması YASAK):\n"
-	+ "- EditorPlugin isen paneli yalnız resmi API ile ekle "
-	+ "(add_control_to_bottom_panel / add_control_to_dock / "
-	+ "add_control_to_container) ve `_exit_tree`'de MUTLAKA karşılığı "
-	+ "remove_control_from_* + queue_free — yoksa diğer paneller "
-	+ "bozulur ve sızıntı olur.\n"
-	+ "- Tüm yerleşim Container'larla: VBox/HBox/Margin/Grid/"
-	+ "ScrollContainer. Elle position/size/anchor ile MUTLAK "
-	+ "konumlandırma ve viewport üstüne BİNDİRME YASAK.\n"
-	+ "- İçerik taşabiliyorsa kökü ScrollContainer'a koy (kaydırma "
-	+ "çubuğu görünür olsun); iç düğümlere size_flags "
-	+ "(EXPAND_FILL/SHRINK_*) ve gereken yerde custom_minimum_size "
-	+ "ver. Panel kendi alanına otursun, başka dock'u itmesin.\n"
-	+ "- Sabit piksel/renk varsayma; editör temasını izle "
-	+ "(get_theme_color/_font/_constant) — mobil/farklı DPI bozulmasın."
-)
-
-## AAA 3B ARAZI/MATERYAL KALİTE SÖZLEŞMESİ — telefon testinde
-## üretilen terrain: texture eğimde KAYIYOR, fırça tek tip. Bu
-## kurallar 3B/arazi/shader üretiminde uygulanır.
-const TERRAIN3D_QUALITY_GUARD: String = (
-	"AAA 3B ARAZI/SHADER KURALLARI (texture kayması YASAK):\n"
-	+ "- Arazi/eğimli/heykellenen mesh materyali TRIPLANAR olmalı: "
-	+ "StandardMaterial3D ise uv1_triplanar=true (gerekirse "
-	+ "uv1_world_triplanar=true) ve makul uv1_scale; ya da dünya-"
-	+ "uzayı triplanar shader. Düz UV YASAK — eğimde kayar/gerilir.\n"
-	+ "- Yükseklik değişince: ŞEKİL collision'ını (HeightMapShape3D / "
-	+ "ConcavePolygonShape3D) güncelle ve normalleri yeniden "
-	+ "hesapla (kayan ışıklandırma olmasın).\n"
-	+ "- Fırça sistemi Terrain3D gibi ÇOKLU olmalı: en az "
-	+ "yumuşak/keskin/doğrusal/küre/sabit düşüş tipleri; ayarlanır "
-	+ "yarıçap + güç + düşüş; UI'da fırça tipi seçici. Düşüş GERÇEK "
-	+ "matematik (smoothstep/pow/clamp) — sahte/tek tip YASAK."
-)
-
 ## ÇALIŞAN SAHNE SÖZLEŞMESİ — hedef .tscn ise üretilen metin Godot
 ## 4.6'nın gerçekten yükleyebileceği geçerli bir sahne olmalı (oyun
 ## çalışsın). UID YOK (kararsız) → script'e `path=` ile atıfta bulun.
@@ -196,22 +156,12 @@ const SYSTEM_PROMPTS: Dictionary = {
 # ============================================================
 
 ## Bir rolün sistem promptunu döndürür (ortak kısıtlar eklenmiş).
-## Tanımsız rol için boş string. Kod üreten roller + Architect ayrıca
-## AAA UI/3B kalite sözleşmelerini alır (PM/QA/TechWriter promptu yalın
-## kalır — token israfı yok).
+## Tanımsız rol için boş string.
 static func system_prompt(role: int) -> String:
 	var base: String = SYSTEM_PROMPTS.get(role, "")
 	if base.is_empty():
 		return ""
-	var prompt: String = (
-		base + "\n\n" + COMMON_CONSTRAINTS + "\n\n" + GODOT4_API_GUARD
-	)
-	if AICellRoles.is_code_generating(role) \
-			or role == AICellRoles.Role.ARCHITECT:
-		prompt += (
-			"\n\n" + UI_QUALITY_GUARD + "\n\n" + TERRAIN3D_QUALITY_GUARD
-		)
-	return prompt
+	return base + "\n\n" + COMMON_CONSTRAINTS + "\n\n" + GODOT4_API_GUARD
 
 
 ## Bir rolün sistem promptu tanımlı mı?

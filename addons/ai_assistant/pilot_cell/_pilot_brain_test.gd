@@ -26,7 +26,6 @@ static func run_all() -> Array:
 	results.append(_b("Brain: Prompts", _test_prompts_task_message()))
 	results.append(_b("Brain: Prompts", _test_prompts_context()))
 	results.append(_b("Brain: Prompts", _test_prompts_no_truncate()))
-	results.append(_b("Brain: Prompts", _test_prompts_quality_guards()))
 
 	# AgentBrain
 	results.append(_b("Brain: Think", _test_brain_offline()))
@@ -101,30 +100,6 @@ static func _test_prompts_godot4_guard() -> Dictionary:
 		AICellRoles.Role.ARCHITECT
 	).contains("create_tween()"):
 		return _fail(name, "Architect promptu G4 sözleşmesiz")
-	return _ok(name)
-
-
-static func _test_prompts_quality_guards() -> Dictionary:
-	var name := "Kod rolleri AAA UI/3B kalite sözleşmesi alır, PM almaz"
-	var code: String = AIRolePrompts.system_prompt(
-		AICellRoles.Role.CODE_ENGINEER
-	)
-	# UI: panel yaşam döngüsü + ScrollContainer; 3B: triplanar + fırça
-	for needle in ["remove_control_from", "ScrollContainer",
-			"triplanar", "Terrain3D"]:
-		if not code.contains(needle):
-			return _fail(name, "kod rolünde kalite kuralı eksik: "
-				+ needle)
-	# Architect de hizalı (tasarım kaliteyi bilsin)
-	if not AIRolePrompts.system_prompt(
-		AICellRoles.Role.ARCHITECT
-	).contains("triplanar"):
-		return _fail(name, "Architect kalite sözleşmesiz")
-	# PM yalın kalmalı (token israfı yok)
-	if AIRolePrompts.system_prompt(
-		AICellRoles.Role.PRODUCT_MANAGER
-	).contains("triplanar"):
-		return _fail(name, "PM promptu gereksiz şişti")
 	return _ok(name)
 
 
