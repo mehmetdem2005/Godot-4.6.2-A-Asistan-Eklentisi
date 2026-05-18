@@ -115,6 +115,12 @@ func apply_generated_code(
 	if code.strip_edges().is_empty():
 		return _stage("extract", false, "LLM çıktısından kod çıkarılamadı")
 
+	# --- Üretilen-yazım kapısı (AAA: yalnız res://game/ altı; elle
+	# yazılan kod / addons / project.godot ek olarak korunur) ---
+	var pg: Dictionary = AIPathGuard.check_generated_write(target_path)
+	if not bool(pg["allowed"]):
+		return _stage("path_guard", false, str(pg["reason"]))
+
 	# --- Verifier ---
 	pipeline_progress.emit("Doğrulanıyor...")
 	var vr: Dictionary = _verifier.verify(code)

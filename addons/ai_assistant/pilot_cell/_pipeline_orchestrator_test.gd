@@ -114,8 +114,8 @@ static func _test_spawn_from_architect() -> Dictionary:
 	o.free()
 	if reg.size() != 1:
 		return _fail(name, "tek görev (dedup) beklendi: %d" % reg.size())
-	if not str(reg[0]["target_file"]).begins_with("user://"):
-		return _fail(name, "güvenli hedef yolu üretilmeli")
+	if not str(reg[0]["target_file"]).begins_with("res://game/"):
+		return _fail(name, "güvenli AAA hedef yolu üretilmeli")
 	return _ok(name)
 
 
@@ -262,18 +262,26 @@ static func _test_build_plan() -> Dictionary:
 static func _test_apply_valid_executes() -> Dictionary:
 	var name := "Geçerli kod: verify→gate→GERÇEK yazım"
 	var o := _new()
+	# AAA: üretilen yazım yalnız res://game/ altına; testten sonra
+	# repoyu kirletmemek için yazılan dosya temizlenir.
+	var tpath := "res://game/scripts/__e2e_hello_ok__.gd"
 	var r: Dictionary = o.apply_generated_code(
-		"user://ai_assistant/e2e_test/hello_ok.gd",
+		tpath,
 		"```gdscript\n" + VALID_CODE + "```",
 		"CodeEngineer"
 	)
 	o.free()
+	var wrote: bool = FileAccess.file_exists(tpath)
+	if wrote:
+		DirAccess.remove_absolute(tpath)
 	if str(r["stage"]) != "executed":
 		return _fail(name, "executed aşamasına ulaşmalı: " +
 			str(r["stage"]) + " / " + str(r["message"]))
 	if not bool(r["ok"]):
 		return _fail(name, "gerçek yazım başarılı olmalı: " +
 			str(r["message"]))
+	if not wrote:
+		return _fail(name, "dosya res://game/ altına yazılmalıydı")
 	return _ok(name)
 
 
@@ -281,7 +289,7 @@ static func _test_apply_invalid_blocked() -> Dictionary:
 	var name := "Geçersiz kod: verify'da durur, YAZILMAZ (mock)"
 	var o := _new()
 	var r: Dictionary = o.apply_generated_code(
-		"user://ai_assistant/e2e_test/bad.gd",
+		"res://game/scripts/__e2e_bad__.gd",
 		"func ( bu gecersiz gdscript !!!",
 		"CodeEngineer"
 	)
@@ -297,7 +305,7 @@ static func _test_apply_empty() -> Dictionary:
 	var name := "Boş içerik: extract aşamasında durur"
 	var o := _new()
 	var r: Dictionary = o.apply_generated_code(
-		"user://ai_assistant/e2e_test/empty.gd", "   ```\n```  ",
+		"res://game/scripts/__e2e_empty__.gd", "   ```\n```  ",
 		"CodeEngineer"
 	)
 	o.free()
@@ -318,7 +326,7 @@ static func _test_hitl_gate_blocks() -> Dictionary:
 		AIRiskAssessor.RiskLevel.LOW
 	)
 	var r: Dictionary = o.apply_generated_code(
-		"user://ai_assistant/e2e_test/gated.gd",
+		"res://game/scripts/__e2e_gated__.gd",
 		"```gdscript\n" + VALID_CODE + "```",
 		"CodeEngineer"
 	)

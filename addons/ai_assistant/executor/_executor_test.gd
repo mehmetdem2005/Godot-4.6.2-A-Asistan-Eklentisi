@@ -24,6 +24,7 @@ static func run_all() -> Array:
 	results.append(_b("Exec: PathGuard", _test_guard_blocks_self()))
 	results.append(_b("Exec: PathGuard", _test_guard_blocks_readonly()))
 	results.append(_b("Exec: PathGuard", _test_guard_blocks_engine_dirs()))
+	results.append(_b("Exec: PathGuard", _test_generated_write_clamp()))
 
 	# OperationJournal — write-ahead
 	results.append(_b("Exec: Journal", _test_journal_lifecycle()))
@@ -160,6 +161,28 @@ static func _test_guard_blocks_engine_dirs() -> Dictionary:
 		return _fail(name, ".godot yazılabilir")
 	if AIPathGuard.can_write("res://.import/x.md5"):
 		return _fail(name, ".import yazılabilir")
+	return _ok(name)
+
+
+static func _test_generated_write_clamp() -> Dictionary:
+	var name := "PathGuard üretilen-yazımı res://game/ altına sıkıştırır"
+	# İzinli: üretilen kök altı
+	if not AIPathGuard.can_generate_write("res://game/scripts/p.gd"):
+		return _fail(name, "res://game/scripts/ reddedildi")
+	if not AIPathGuard.can_generate_write("res://game/scenes/m.tscn"):
+		return _fail(name, "res://game/scenes/ reddedildi")
+	# Reddedilmeli: kök dışı (genel check_write geçse bile)
+	if AIPathGuard.can_generate_write("res://core/engine.gd"):
+		return _fail(name, "kök dışı res:// üretime izin verildi")
+	if AIPathGuard.can_generate_write("user://x/y.gd"):
+		return _fail(name, "user:// üretime izin verildi")
+	# Reddedilmeli: traversal + addons + project.godot (devralınan)
+	if AIPathGuard.can_generate_write("res://game/../addons/x.gd"):
+		return _fail(name, "traversal üretime izin verildi")
+	if AIPathGuard.can_generate_write(
+		"res://addons/ai_assistant/plugin.gd"
+	):
+		return _fail(name, "addons üretime izin verildi")
 	return _ok(name)
 
 

@@ -15,13 +15,24 @@ extends Node
 ## (sahte plan ÜRETİLMEZ — istek aynen tek adım olur).
 ##
 ## Güvenlik: model-üretimi dosya yolu ENJEKSİYON yüzeyidir —
-## sanitize_target yalnız [a-z0-9_] basename + .gd, sabit user://
-## önekine zorlar (path traversal / res:// imkânsız).
+## sanitize_target yalnız [a-z0-9_] basename, sabit res://game/ kökü +
+## türe göre alt klasör (.gd→scripts, .tscn→scenes) önekine zorlar
+## (path traversal / kök dışı imkânsız). Var olan dosya ASLA ezilmez —
+## çakışan ad _2, _3… ile benzersizleştirilir (AAA: üretilen kod elle
+## yazılan kodu bozmaz).
 
 signal decomposed(tasks: Array)
 
-## Üretilen dosyaların güvenli kök dizini (res:// bu turda YOK).
-const OUT_DIR: String = "user://ai_assistant/uretilen/"
+## Üretilen oyunun kök dizini (AAA profesyonel yerleşim — projenin
+## İÇİNDE ki Godot res:// tarayıp class_name/sahne kaydetsin, ama izole
+## ve türe göre düzenli olsun). path_guard ayrıca bu köke sıkıştırır.
+const GAME_ROOT: String = "res://game/"
+const SCRIPTS_DIR: String = "res://game/scripts/"
+const SCENES_DIR: String = "res://game/scenes/"
+const RESOURCES_DIR: String = "res://game/resources/"
+
+## Çakışma benzersizleştirme üst sınırı (sonsuz döngü koruması).
+const MAX_UNIQUE_TRIES: int = 999
 
 ## Alt görev sayısı sınırları (sonsuz/boş plana karşı).
 const MAX_TASKS: int = 6
@@ -67,13 +78,16 @@ func _on_thought(thought: Dictionary) -> void:
 
 
 ## Modele verilen planlama yönergesi — yalnız JSON dizi istenir.
+## Dizin SEÇTİRİLMEZ (kök sabit, güvenlik): yalnız dosya ADI istenir;
+## yerleşim sanitize_target tarafından türe göre yapılır.
 func _planning_prompt(instruction: String) -> String:
 	return (
 		"Aşağıdaki Godot 4.6 oyun geliştirme isteğini "
 		+ str(MIN_TASKS) + "-" + str(MAX_TASKS) + " bağımsız alt göreve "
-		+ "böl. Her alt görev TEK bir GDScript dosyası üretmeli. "
-		+ "SADECE şu biçimde bir JSON dizi döndür, başka HİÇBİR "
-		+ "açıklama yazma:\n"
+		+ "böl. Her alt görev TEK bir dosya üretmeli (GDScript .gd). "
+		+ "target_file SADECE dosya adı olsun (yol/klasör YAZMA — "
+		+ "yerleşimi sistem yapar). SADECE şu biçimde bir JSON dizi "
+		+ "döndür, başka HİÇBİR açıklama yazma:\n"
 		+ "[{\"title\":\"kısa görev adı\",\"target_file\":\"ad.gd\"}]\n"
 		+ "İSTEK: " + instruction
 	)
@@ -117,21 +131,24 @@ func parse_plan(content: String, instruction: String) -> Array:
 	return tasks
 
 
-## Model-üretimi dosya adını güvenli user:// yoluna zorlar.
-## Yalnız [a-z0-9_] basename + .gd; path traversal / res:// imkânsız.
+## Model-üretimi dosya adını güvenli res://game/ yoluna zorlar.
+## Yalnız [a-z0-9_] basename; uzantıya göre alt klasör (.gd→scripts,
+## .tscn→scenes, diğer→resources); path traversal / kök dışı imkânsız.
+## Var olan dosya ASLA ezilmez — çakışırsa _2, _3… eklenir.
 func sanitize_target(raw: String, title: String) -> String:
 	var base: String = raw
 	var sep: int = base.rfind("/")
 	if sep != -1:
 		base = base.substr(sep + 1)
-	if base.to_lower().ends_with(".gd"):
-		base = base.substr(0, base.length() - 3)
+	var ext: String = _detect_ext(base)
+	if base.to_lower().ends_with("." + ext):
+		base = base.substr(0, base.length() - ext.length() - 1)
 	var slug: String = _slug(base)
 	if slug.is_empty():
 		slug = _slug(title)
 	if slug.is_empty():
 		slug = "uretim"
-	return OUT_DIR + slug + ".gd"
+	return _unique_path(_dir_for_ext(ext), slug, ext)
 
 
 ## Tek görevlik güvenli fallback (plan bölünemediğinde).
@@ -141,8 +158,44 @@ func _fallback(instruction: String) -> Dictionary:
 		slug = "uretim"
 	return {
 		"title": instruction.strip_edges(),
-		"target_file": OUT_DIR + slug + ".gd",
+		"target_file": _unique_path(SCRIPTS_DIR, slug, "gd"),
 	}
+
+
+## Dosya adındaki uzantıyı saptar — desteklenen: gd, tscn. Aksi: gd
+## (üretim varsayılanı GDScript; sözleşme tek-dosya .gd).
+func _detect_ext(base: String) -> String:
+	var low: String = base.to_lower()
+	if low.ends_with(".tscn"):
+		return "tscn"
+	return "gd"
+
+
+## Uzantıya göre AAA alt klasörü (türe göre düzenli yerleşim).
+func _dir_for_ext(ext: String) -> String:
+	match ext:
+		"tscn":
+			return SCENES_DIR
+		"gd":
+			return SCRIPTS_DIR
+		_:
+			return RESOURCES_DIR
+
+
+## Var olan dosyayı EZMEYEN benzersiz yol üretir (AAA: üretilen kod
+## elle yazılan kodu bozmaz). dir + slug(.ext); çakışırsa slug_2…
+func _unique_path(dir: String, slug: String, ext: String) -> String:
+	var candidate: String = dir + slug + "." + ext
+	if not FileAccess.file_exists(candidate):
+		return candidate
+	var n: int = 2
+	while n <= MAX_UNIQUE_TRIES:
+		candidate = "%s%s_%d.%s" % [dir, slug, n, ext]
+		if not FileAccess.file_exists(candidate):
+			return candidate
+		n += 1
+	# Üst sınır (pratikte ulaşılmaz) — yine de güvenli kök içinde kal.
+	return dir + slug + "_x." + ext
 
 
 ## Serbest metni güvenli slug'a indirger (a-z0-9_, ≤24).

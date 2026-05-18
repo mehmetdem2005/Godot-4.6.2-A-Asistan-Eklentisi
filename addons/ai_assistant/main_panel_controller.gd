@@ -284,7 +284,9 @@ func default_target_path(task_text: String) -> String:
 			break
 	if slug.is_empty():
 		slug = "uretim"
-	return "user://ai_assistant/uretilen/%s.gd" % slug
+	# AAA yerleşim: üretilen scriptler res://game/scripts/ altında
+	# (proje İÇİNDE — Godot class_name kaydeder; path_guard sıkıştırır).
+	return "res://game/scripts/%s.gd" % slug
 
 
 # ============================================================

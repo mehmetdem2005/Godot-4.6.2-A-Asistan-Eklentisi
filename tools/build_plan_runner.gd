@@ -73,7 +73,11 @@ func _on_done(result: Dictionary) -> void:
 			str(ft.get("title", "")), str(ft.get("reason", "")),
 		])
 	var read_count: int = 0
+	var all_in_game_root: bool = true
 	for p in paths:
+		if not str(p).begins_with("res://game/"):
+			all_in_game_root = false
+			print("  UYARI: kök dışı yol — " + str(p))
 		if FileAccess.file_exists(str(p)):
 			var f := FileAccess.open(str(p), FileAccess.READ)
 			if f != null:
@@ -81,11 +85,13 @@ func _on_done(result: Dictionary) -> void:
 				print(f.get_as_text())
 				f.close()
 				read_count += 1
-	# Çok-adım kanıtı: ≥2 dosya gerçekten yazılmış olmalı.
+	# Çok-adım kanıtı: ≥2 dosya GERÇEKTEN res://game/ altına yazılmış
+	# olmalı (AAA: proje İÇİNDE, izole, türe göre düzenli).
 	_success = (
 		bool(result.get("ok", false))
 		and read_count >= 2
 		and failed.is_empty()
+		and all_in_game_root
 	)
 	if _success:
 		print("SONUC: PLAN_TAMAM (%d dosya)" % read_count)

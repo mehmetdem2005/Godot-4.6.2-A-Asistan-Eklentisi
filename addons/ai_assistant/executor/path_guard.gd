@@ -36,6 +36,11 @@ const READ_ONLY_PATHS: Array = [
 ## Path traversal işareti.
 const TRAVERSAL_TOKEN: String = ".."
 
+## AI'ın ÜRETTİĞİ kodun yazılabileceği TEK kök (AAA izole yerleşim).
+## Üretilen dosyalar yalnız buraya — elle yazılan kod / addons /
+## project.godot bu daha-dar kapıyla ek olarak korunur.
+const GENERATED_ROOT: String = "res://game/"
+
 
 ## Bir yola YAZMA (oluştur/değiştir/sil/taşı) izni var mı kontrol eder.
 ## Dönen: {allowed: bool, reason: String}
@@ -77,6 +82,31 @@ static func check_write(path: String) -> Dictionary:
 			return _deny("Yalnızca-okuma dosyası: %s" % ro)
 
 	return {"allowed": true, "reason": ""}
+
+
+## AI'ın ÜRETTİĞİ kod için DAHA DAR yazma kapısı: önce tüm genel
+## check_write kuralları (traversal, addons, project.godot, sistem
+## yolu), SONRA "yalnız res://game/ altı" kısıtı. Orkestratör üretilen
+## dosyayı diske vermeden bunu uygular — model uydurma yol üretse bile
+## elle yazılan kodu / motoru bozamaz.
+## Dönen: {allowed: bool, reason: String}
+static func check_generated_write(path: String) -> Dictionary:
+	var base: Dictionary = check_write(path)
+	if not bool(base["allowed"]):
+		return base
+	var p: String = path.strip_edges()
+	if not p.begins_with(GENERATED_ROOT):
+		return _deny(
+			"Üretilen kod yalnız %s altına yazılır: %s" % [
+				GENERATED_ROOT, p
+			]
+		)
+	return {"allowed": true, "reason": ""}
+
+
+## Üretilen kod için kısa kontrol (bool).
+static func can_generate_write(path: String) -> bool:
+	return check_generated_write(path)["allowed"]
 
 
 ## Bir yoldan OKUMA izni var mı kontrol eder.

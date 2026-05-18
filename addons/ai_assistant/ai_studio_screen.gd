@@ -430,6 +430,13 @@ func _on_pipeline_done(result: Dictionary) -> void:
 	_send_btn.disabled = false
 	_redraw_chat()
 	_refresh_status()
+	# Üretilen dosyalar res://game/ altına yazıldı — editör dosya
+	# sistemini tara ki Godot class_name'leri/sahneleri kaydetsin
+	# (yalnız editör; orkestratör sahnesiz/test-edilebilir kalır).
+	if stage != "chat" and Engine.is_editor_hint():
+		var fs := EditorInterface.get_resource_filesystem()
+		if fs != null:
+			fs.scan()
 
 
 func _redraw_chat() -> void:

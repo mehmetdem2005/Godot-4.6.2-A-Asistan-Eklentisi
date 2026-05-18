@@ -24,6 +24,8 @@ static func run_all() -> Array:
 	results.append(_b("Decompose: Güvenlik", _test_sanitize_traversal()))
 	results.append(_b("Decompose: Güvenlik", _test_sanitize_resource()))
 	results.append(_b("Decompose: Güvenlik", _test_sanitize_default()))
+	results.append(_b("Decompose: Yerleşim", _test_subfolder_by_ext()))
+	results.append(_b("Decompose: Yerleşim", _test_no_overwrite_unique()))
 	results.append(_b("Decompose: Köprü", _test_no_bridge_fallback()))
 	return results
 
@@ -58,7 +60,7 @@ static func _test_parse_valid() -> Dictionary:
 		return _fail(name, "2 görev beklendi: %d" % tasks.size())
 	if str(tasks[0]["title"]) != "Oyuncu":
 		return _fail(name, "başlık kayboldu")
-	if str(tasks[0]["target_file"]) != "user://ai_assistant/uretilen/player.gd":
+	if str(tasks[0]["target_file"]) != "res://game/scripts/player.gd":
 		return _fail(name, "yol: " + str(tasks[0]["target_file"]))
 	return _ok(name)
 
@@ -85,7 +87,7 @@ static func _test_parse_string_items() -> Dictionary:
 	if tasks.size() != 2 or str(tasks[1]["title"]) != "UI":
 		return _fail(name, "string öğeler ayrışmadı")
 	if not str(tasks[0]["target_file"]).begins_with(
-		"user://ai_assistant/uretilen/"
+		"res://game/scripts/"
 	):
 		return _fail(name, "string öğeye güvenli yol verilmedi")
 	return _ok(name)
@@ -128,11 +130,11 @@ static func _test_parse_empty_array() -> Dictionary:
 
 
 static func _test_sanitize_traversal() -> Dictionary:
-	var name := "Path traversal nötrlenir (basename + user://)"
+	var name := "Path traversal nötrlenir (basename + res://game/)"
 	var d := _new()
 	var p: String = d.sanitize_target("../../etc/passwd", "x")
 	d.free()
-	if not p.begins_with("user://ai_assistant/uretilen/"):
+	if not p.begins_with("res://game/scripts/"):
 		return _fail(name, "güvenli öneke zorlanmadı: " + p)
 	if p.contains("..") or p.contains("etc"):
 		return _fail(name, "traversal sızdı: " + p)
@@ -140,14 +142,12 @@ static func _test_sanitize_traversal() -> Dictionary:
 
 
 static func _test_sanitize_resource() -> Dictionary:
-	var name := "res:// denemesi user://'ye indirgenir"
+	var name := "Yol içeren ad basename'e indirgenir (kök dışı imkânsız)"
 	var d := _new()
 	var p: String = d.sanitize_target("res://core/engine.gd", "yedek")
 	d.free()
-	if not p.begins_with("user://ai_assistant/uretilen/"):
-		return _fail(name, "res:// engellenmedi: " + p)
-	if not p.ends_with(".gd"):
-		return _fail(name, ".gd uzantısı zorlanmadı")
+	if p != "res://game/scripts/engine.gd":
+		return _fail(name, "kök dışı engellenmedi: " + p)
 	return _ok(name)
 
 
@@ -157,10 +157,49 @@ static func _test_sanitize_default() -> Dictionary:
 	var p1: String = d.sanitize_target("", "Oyuncu Hareketi")
 	var p2: String = d.sanitize_target("", "!!!")
 	d.free()
-	if p1 != "user://ai_assistant/uretilen/oyuncu_hareketi.gd":
+	if p1 != "res://game/scripts/oyuncu_hareketi.gd":
 		return _fail(name, "başlık slug yanlış: " + p1)
-	if p2 != "user://ai_assistant/uretilen/uretim.gd":
+	if p2 != "res://game/scripts/uretim.gd":
 		return _fail(name, "varsayılan yanlış: " + p2)
+	return _ok(name)
+
+
+static func _test_subfolder_by_ext() -> Dictionary:
+	var name := "Uzantıya göre AAA alt klasör (.gd→scripts, .tscn→scenes)"
+	var d := _new()
+	var gd: String = d.sanitize_target("player.gd", "Oyuncu")
+	var scn: String = d.sanitize_target("main.tscn", "Ana Sahne")
+	d.free()
+	if gd != "res://game/scripts/player.gd":
+		return _fail(name, ".gd scripts'e gitmeli: " + gd)
+	if scn != "res://game/scenes/main.tscn":
+		return _fail(name, ".tscn scenes'e gitmeli: " + scn)
+	return _ok(name)
+
+
+static func _test_no_overwrite_unique() -> Dictionary:
+	var name := "Var olan dosya ezilmez — çakışan ad _2 ile benzersizleşir"
+	var d := _new()
+	# Gerçek disk: user:// altında izole bir test kökü kur (res://game/
+	# repoyu kirletmesin) — _unique_path saf yardımcı, dizinden bağımsız.
+	var dir := "user://__pg_uniq_test__/"
+	DirAccess.make_dir_recursive_absolute(dir)
+	var f := FileAccess.open(dir + "x.gd", FileAccess.WRITE)
+	if f == null:
+		d.free()
+		return _fail(name, "ön koşul: test dosyası yazılamadı")
+	f.store_string("# var")
+	f.close()
+	var first: String = d._unique_path(dir, "x", "gd")
+	var second: String = d._unique_path(dir, "yeni", "gd")
+	d.free()
+	# Temizlik
+	DirAccess.remove_absolute(dir + "x.gd")
+	DirAccess.remove_absolute(dir)
+	if first != dir + "x_2.gd":
+		return _fail(name, "çakışma _2 ile çözülmedi: " + first)
+	if second != dir + "yeni.gd":
+		return _fail(name, "çakışmasız ad değişmemeli: " + second)
 	return _ok(name)
 
 

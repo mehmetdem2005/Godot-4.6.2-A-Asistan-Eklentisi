@@ -138,8 +138,8 @@ static func _test_target_path() -> Dictionary:
 	var name := "Hedef yol görevden türetilir"
 	var c := _c()
 	var p: String = c.default_target_path("Merhaba Dunya")
-	if not p.begins_with("user://ai_assistant/uretilen/"):
-		return _fail(name, "yol izinli user:// kökünde olmalı")
+	if not p.begins_with("res://game/scripts/"):
+		return _fail(name, "yol AAA res://game/scripts/ kökünde olmalı")
 	if not p.ends_with(".gd"):
 		return _fail(name, "yol .gd ile bitmeli")
 	return _ok(name)
