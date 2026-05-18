@@ -55,7 +55,8 @@ func _initialize() -> void:
 
 func _begin() -> void:
 	print("=== ÇOK-ADIMLI PLAN BAŞLIYOR ===")
-	var ok: bool = _orch.run_build_plan(GOAL, GOAL)
+	var proj: String = AIProjectScanner.new().project_summary()
+	var ok: bool = _orch.run_build_plan(GOAL, GOAL, "", proj)
 	if not ok:
 		print("HATA: run_build_plan başlatılamadı")
 

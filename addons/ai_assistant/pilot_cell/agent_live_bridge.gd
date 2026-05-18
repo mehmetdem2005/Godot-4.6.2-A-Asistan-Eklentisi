@@ -113,7 +113,8 @@ func think_live(
 ## history: önceki konuşma turları [{role, content}] (eski→yeni) —
 ## çok-turlu hafıza. Boş = eski stateless davranış (geriye uyumlu).
 func think_chat(
-	message: String, model: String = "", history: Array = []
+	message: String, model: String = "", history: Array = [],
+	project_context: String = ""
 ) -> bool:
 	if _busy:
 		_emit_fail(-1, "Köprü meşgul — başka bir düşünme sürüyor")
@@ -133,6 +134,12 @@ func think_chat(
 		+ "kod bloğu yazma. Yanıta kendi rol tanımını tekrar ederek "
 		+ "başlama."
 	))
+	if not project_context.strip_edges().is_empty():
+		request.add_message("system", (
+			"Aşağıda kullanıcının Godot projesinin GERÇEK dosya/klasör "
+			+ "listesi var. 'Hangi dosyalar var' gibi sorularda BUNU "
+			+ "kullan — erişimin yok deme.\n" + project_context
+		))
 	_append_history(request, history)
 	request.add_message("user", message)
 	if not model.strip_edges().is_empty():

@@ -21,7 +21,20 @@ static func run_all() -> Array:
 	results.append(_b("Chain: Heuristik", _test_is_fail_mixed()))
 	results.append(_b("Chain: Köprü", _test_no_bridge_honest()))
 	results.append(_b("Chain: Köprü", _test_no_router_honest()))
+	results.append(_b("Chain: Model", _test_code_model_is_chat()))
 	return results
+
+
+static func _test_code_model_is_chat() -> Dictionary:
+	var name := "Kod rolleri deepseek-chat'e zorlanır (reasoner değil)"
+	if AIRoleChainRunner.CODE_MODEL != "deepseek-chat":
+		return _fail(name, "CODE_MODEL deepseek-chat olmalı")
+	# Sözleşme: zincirdeki kod-üreten rol gerçekten kod-üreten say.
+	if not AICellRoles.is_code_generating(AICellRoles.Role.CODE_ENGINEER):
+		return _fail(name, "CodeEngineer kod-üreten olmalı")
+	if AICellRoles.is_code_generating(AICellRoles.Role.ARCHITECT):
+		return _fail(name, "Architect kod-üreten sayılmamalı (model korunur)")
+	return _ok(name)
 
 
 static func _b(batch: String, result: Dictionary) -> Dictionary:

@@ -296,18 +296,19 @@ func _on_send() -> void:
 	_running = true
 	_send_btn.disabled = true
 	var intent: int = _ctrl.classify_intent(task)
+	var proj: String = _ctrl.project_context()
 	if intent == AIMainPanelController.Intent.CHAT:
 		_ctrl.add_message("system", "… Asistan yanıtlıyor…")
 		_redraw_chat()
 		_orch.run_chat(
-			task, _ctrl.model_name(), _ctrl.conversation_history()
+			task, _ctrl.model_name(), _ctrl.conversation_history(), proj
 		)
 	else:
 		_ctrl.add_message(
 			"system", "… Plan çıkarılıyor (çok-adımlı üretim)…"
 		)
 		_redraw_chat()
-		_orch.run_build_plan(task, task, _ctrl.model_name())
+		_orch.run_build_plan(task, task, _ctrl.model_name(), proj)
 
 
 func _on_progress(step: String) -> void:

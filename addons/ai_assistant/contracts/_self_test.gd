@@ -59,6 +59,7 @@ static func run_all() -> Dictionary:
 	results.append(_b("Batch 3b", _test_verification_roundtrip()))
 	results.append(_b("Batch 3b", _test_provider_request_cache_key()))
 	results.append(_b("Batch 3b", _test_provider_request_roundtrip()))
+	results.append(_b("Batch 3b", _test_provider_request_max_tokens_default()))
 	results.append(_b("Batch 3b", _test_cell_message_reflection()))
 	results.append(_b("Batch 3b", _test_cell_message_roundtrip()))
 	results.append(_b("Batch 3b", _test_error_report_classification()))
@@ -230,6 +231,10 @@ static func run_all() -> Dictionary:
 	# --- PHASE 34: Çoklu Rol Zinciri (Plan C) ---
 	for chain_result in AIRoleChainRunnerTest.run_all():
 		results.append(chain_result)
+
+	# --- PHASE 35: Proje Dosya Görünürlüğü ---
+	for scan_result in AIProjectScannerTest.run_all():
+		results.append(scan_result)
 
 	return _build_report(results)
 
@@ -915,6 +920,21 @@ static func _test_provider_request_roundtrip() -> Dictionary:
 		return _fail(name, "max_tokens kayboldu")
 	if r2.messages.size() != 1:
 		return _fail(name, "messages kayboldu")
+	return _ok(name)
+
+
+static func _test_provider_request_max_tokens_default() -> Dictionary:
+	var name := "ProviderRequest max_tokens varsayılanı API tavanı (8192)"
+	var r := AIProviderRequest.create(
+		AIProviderRequest.Purpose.CODE, "CodeEngineer"
+	)
+	if r.max_tokens != 8192:
+		return _fail(name, "varsayılan 8192 olmalı: %d" % r.max_tokens)
+	var r2 := AIProviderRequest.new()
+	r2.from_dict({})
+	if r2.max_tokens != 8192:
+		return _fail(name, "from_dict varsayılanı 8192 olmalı: %d"
+			% r2.max_tokens)
 	return _ok(name)
 
 

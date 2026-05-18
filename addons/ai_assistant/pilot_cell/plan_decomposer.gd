@@ -38,14 +38,20 @@ func attach_bridge(bridge: AIAgentLiveBridge) -> void:
 
 ## İsteği alt görevlere böler (asenkron). Sonuç 'decomposed' ile gelir.
 ## Dönen: çağrı başlatılabildi mi (false = fallback yine yayılır).
-func decompose(instruction: String, model: String = "") -> bool:
+func decompose(
+	instruction: String, model: String = "", project_context: String = ""
+) -> bool:
 	_instruction = instruction
 	if _bridge == null:
 		decomposed.emit([_fallback(instruction)])
 		return false
 	if not _bridge.thought_completed.is_connected(_on_thought):
 		_bridge.thought_completed.connect(_on_thought)
-	return _bridge.think_chat(_planning_prompt(instruction), model)
+	var prompt: String = _planning_prompt(instruction)
+	if not project_context.strip_edges().is_empty():
+		prompt += "\n\nMEVCUT PROJE (yeni dosya adları çakışmasın):\n" \
+			+ project_context
+	return _bridge.think_chat(prompt, model)
 
 
 func _on_thought(thought: Dictionary) -> void:

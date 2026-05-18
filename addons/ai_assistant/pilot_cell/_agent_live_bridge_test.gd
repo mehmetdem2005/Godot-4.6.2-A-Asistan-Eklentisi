@@ -26,7 +26,32 @@ static func run_all() -> Array:
 	results.append(_b("LiveBridge: Eşleme", _test_finalize_no_router()))
 	results.append(_b("LiveBridge: Mock", _test_finalize_mock_policy()))
 	results.append(_b("LiveBridge: Sohbet", _test_chat_no_router_fails()))
+	results.append(_b("LiveBridge: Sohbet", _test_chat_extra_params_safe()))
 	return results
+
+
+static func _test_chat_extra_params_safe() -> Dictionary:
+	var name := "think_chat history+project_context additive (regresyon yok)"
+	var bridge := AIAgentLiveBridge.new()
+	var captured: Array = []
+	bridge.thought_completed.connect(func(r: Dictionary) -> void:
+		captured.append(r)
+	)
+	# Geçmiş + proje bağlamı verilse de router yokken sözleşme aynı:
+	# dürüst başarısızlık, sahte içerik yok (geriye uyumlu).
+	var started: bool = bridge.think_chat(
+		"merhaba",
+		"",
+		[{"role": "user", "content": "önceki"},
+			{"role": "assistant", "content": "yanıt"}],
+		"PROJE DOSYALARI:\n  res://player.gd"
+	)
+	bridge.free()
+	if started:
+		return _fail(name, "router yokken başlatılmamalı")
+	if captured.is_empty() or bool(captured[0]["ok"]):
+		return _fail(name, "ek parametrelerle de dürüst hata dönmeli")
+	return _ok(name)
 
 
 static func _test_chat_no_router_fails() -> Dictionary:

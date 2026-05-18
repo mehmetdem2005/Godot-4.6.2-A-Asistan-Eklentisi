@@ -53,7 +53,9 @@ var purpose: int = Purpose.REASONING
 var system_prompt: String = ""
 var messages: Array = []             ## [{role: "user"|"assistant", content: String}]
 var temperature: float = 0.7
-var max_tokens: int = 2048
+## Çıktı token tavanı — sağlayıcı API üst sınırına çekildi (8192).
+## Kod üretimi uzun dosyalarda kesilmesin (kullanıcı: sınırsız yetki).
+var max_tokens: int = 8192
 
 # --- Sahiplik ---
 var owner_role: String = ""          ## Hangi cell role çağırıyor
@@ -140,7 +142,7 @@ func _from_dict_impl(data: Dictionary) -> void:
 	system_prompt = data.get("system_prompt", "")
 	messages = data.get("messages", [])
 	temperature = float(data.get("temperature", 0.7))
-	max_tokens = int(data.get("max_tokens", 2048))
+	max_tokens = int(data.get("max_tokens", 8192))
 	owner_role = data.get("owner_role", "")
 	estimated_input_tokens = int(data.get("estimated_input_tokens", 0))
 	estimated_cost_usd = float(data.get("estimated_cost_usd", 0.0))
