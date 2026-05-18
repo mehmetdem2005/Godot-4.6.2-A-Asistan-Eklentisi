@@ -21,6 +21,7 @@ const OUT_PATH: String = "user://ai_assistant/e2e/merhaba.gd"
 
 var _orch: Node = null
 var _done: bool = false
+var _success: bool = false
 var _started: bool = false
 var _elapsed: float = 0.0
 
@@ -79,7 +80,8 @@ func _on_done(result: Dictionary) -> void:
 			print(f.get_as_text())
 			f.close()
 			wrote = true
-	if bool(result.get("ok", false)) and wrote:
+	_success = bool(result.get("ok", false)) and wrote
+	if _success:
 		print("SONUC: E2E_TAMAM")
 	else:
 		print("SONUC: E2E_BASARISIZ")
@@ -93,7 +95,9 @@ func _process(delta: float) -> bool:
 		_begin()
 		return false
 	if _done:
-		quit(0)
+		# Başarısız E2E sıfır-olmayan kod döndürmeli — yoksa otomatik
+		# ön-kontroller regresyonu fark etmez (PR #1 inceleme notu).
+		quit(0 if _success else 1)
 		return true
 	if _elapsed > 70.0:
 		print("HATA: 70s zaman aşımı")
