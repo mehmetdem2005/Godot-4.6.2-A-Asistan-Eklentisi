@@ -165,6 +165,51 @@ func reset_memory_and_queue() -> Dictionary:
 # GÖREV ÖN KOŞULLARI — mock policy
 # ============================================================
 
+# ============================================================
+# NİYET AYRIMI — sohbet mi, kod üretimi mi
+# ============================================================
+
+## Kullanıcı niyeti: düz sohbet mi yoksa kod/dosya üretimi mi.
+enum Intent { CHAT, BUILD }
+
+## Kod/üretim sinyali veren kökler (nesne/güçlü fiil). Sade "yap"
+## bilerek YOK — "ne yapabilirsin" sohbettir.
+const BUILD_HINTS: Array = [
+	"üret", "uret", "oluştur", "olustur", "script", "skript",
+	"kod yaz", "kodla", "node", "sahne", "scene", "shader",
+	"fonksiyon", "function", "sınıf", " class ", ".gd", ".tscn",
+	"generate", "create ", "implement", "refactor", "build a",
+	"make a", "make me", "write a", "yaz:", "düzelt", "duzelt",
+	"ekle ", "oyun", "game",
+]
+
+## Açıkça sohbet olan selam/küçük konuşma.
+const CHAT_HINTS: Array = [
+	"merhaba", "selam", "selamün", "hey", "hello", "hi ", "hi.",
+	"günaydın", "gunaydin", "nasılsın", "nasilsin", "naber",
+	"teşekkür", "tesekkur", "sağ ol", "sag ol", "kimsin",
+	"ne yapabilirsin", "yardım", "yardim",
+]
+
+
+## Mesajın niyetini sezgisel sınıflar. Çevrimdışı, deterministik.
+## Selam/soru → CHAT; üretim sinyali → BUILD.
+func classify_intent(text: String) -> int:
+	var t: String = text.strip_edges().to_lower()
+	if t.is_empty():
+		return Intent.CHAT
+	for g in CHAT_HINTS:
+		if t == str(g).strip_edges() or t.begins_with(str(g)):
+			return Intent.CHAT
+	# Soru ya da çok kısa → sohbet (BUILD kökü olsa bile soru güvenli)
+	if t.ends_with("?") or t.split(" ", false).size() <= 2:
+		return Intent.CHAT
+	for b in BUILD_HINTS:
+		if t.contains(str(b)):
+			return Intent.BUILD
+	return Intent.CHAT
+
+
 ## Bir görev çalıştırılabilir mi? Boş görev / anahtarsız → açık ret
 ## (sahte başlatma YOK). Anahtar varsa zaten canlı çalışılır — ayrı
 ## "canlı mod" engeli kullanıcıya gösterilmez.

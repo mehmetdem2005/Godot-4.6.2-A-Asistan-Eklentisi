@@ -295,12 +295,18 @@ func _on_send() -> void:
 
 	_running = true
 	_send_btn.disabled = true
-	_ctrl.add_message("system", "… Ajan düşünüyor (canlı)…")
-	_redraw_chat()
-	_orch.run_task(
-		"Sohbet görevi", _ctrl.default_target_path(task),
-		task, AICellRoles.Role.CODE_ENGINEER, _ctrl.model_name()
-	)
+	var intent: int = _ctrl.classify_intent(task)
+	if intent == AIMainPanelController.Intent.CHAT:
+		_ctrl.add_message("system", "… Asistan yanıtlıyor…")
+		_redraw_chat()
+		_orch.run_chat(task, _ctrl.model_name())
+	else:
+		_ctrl.add_message("system", "… Ajan düşünüyor (kod üretimi)…")
+		_redraw_chat()
+		_orch.run_task(
+			"Sohbet görevi", _ctrl.default_target_path(task),
+			task, AICellRoles.Role.CODE_ENGINEER, _ctrl.model_name()
+		)
 
 
 func _on_progress(step: String) -> void:
@@ -310,15 +316,19 @@ func _on_progress(step: String) -> void:
 
 func _on_pipeline_done(result: Dictionary) -> void:
 	_ctrl.record_result(result)
-	var ok: bool = bool(result.get("ok", false))
-	var prefix: String = "✓" if ok else "✗"
-	var msg: String = "%s [%s] %s" % [
-		prefix, str(result.get("stage", "?")),
-		str(result.get("message", "")),
-	]
-	if result.has("path"):
-		msg += "\nDosya: " + str(result["path"])
-	_ctrl.add_message("assistant", msg)
+	var stage: String = str(result.get("stage", "?"))
+	if stage == "chat":
+		# Düz sohbet — ✓/✗ etiketi, aşama, dosya YOK; sadece yanıt.
+		_ctrl.add_message("assistant", str(result.get("message", "")))
+	else:
+		var ok: bool = bool(result.get("ok", false))
+		var prefix: String = "✓" if ok else "✗"
+		var msg: String = "%s [%s] %s" % [
+			prefix, stage, str(result.get("message", "")),
+		]
+		if result.has("path"):
+			msg += "\nDosya: " + str(result["path"])
+		_ctrl.add_message("assistant", msg)
 	_running = false
 	_send_btn.disabled = false
 	_redraw_chat()

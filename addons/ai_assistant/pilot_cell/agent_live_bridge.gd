@@ -98,7 +98,38 @@ func think_live(
 	if request == null:
 		_emit_fail(role, "İstek kurulamadı (rol promptsuz olabilir)")
 		return false
+	return _dispatch(request, role)
 
+
+## Doğal SOHBET cevabı için CANLI çağrı (asenkron). Kod hattı değil:
+## Verifier/HITL/Executor YOK — düz konuşma yanıtı döner.
+## Sohbet/kod ayrımı kullanıcıyı "syntactic" hatasına boğmasın diye.
+func think_chat(message: String, model: String = "") -> bool:
+	if _busy:
+		_emit_fail(-1, "Köprü meşgul — başka bir düşünme sürüyor")
+		return false
+	if _router == null:
+		_emit_fail(-1, "Router bağlı değil — canlı çağrı yapılamaz")
+		return false
+
+	var request := AIProviderRequest.create(
+		AIProviderRequest.Purpose.REASONING, "ChatAssistant"
+	)
+	request.add_message("system", (
+		"Rolün: Godot 4.6 oyun motoru için yardımcı, Türkçe konuşan "
+		+ "bir AI asistan. Kullanıcıyla doğal sohbet et; net, kısa ve "
+		+ "yararlı yanıtlar ver. Kod istenmedikçe kod bloğu yazma. "
+		+ "Yanıta kendi rol tanımını tekrar ederek başlama."
+	))
+	request.add_message("user", message)
+	if not model.strip_edges().is_empty():
+		request.model = model.strip_edges()
+	return _dispatch(request, -1)
+
+
+## Hazır bir isteği yönlendirir (cache/ağ) ve sonucu sinyalle döndürür.
+## think_live ve think_chat ortak asenkron çekirdeği — kanıtlanmış desen.
+func _dispatch(request: AIProviderRequest, role: int) -> bool:
 	_active_request = request
 	_active_role = role
 	thought_progress.emit("İstek hazırlandı, yönlendiriliyor...")
