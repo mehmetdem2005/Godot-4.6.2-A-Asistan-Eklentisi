@@ -30,7 +30,24 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Sohbet", _test_chat_no_bridge()))
 	results.append(_b("E2E: Plan", _test_build_plan_no_bridge()))
 	results.append(_b("E2E: Plan", _test_build_plan_no_router()))
+	results.append(_b("E2E: Plan", _test_scan_class_name()))
 	return results
+
+
+static func _test_scan_class_name() -> Dictionary:
+	var name := "class_name çıkarılır (görevler arası tutarlılık)"
+	var o := _new()
+	var code := "@tool\nclass_name SceneData\nextends Resource\n"
+	var got: String = o._scan_class_name(code)
+	if got != "SceneData":
+		o.free()
+		return _fail(name, "class_name yanlış: '%s'" % got)
+	# class_name yoksa boş (uydurma yok).
+	if o._scan_class_name("extends Node\nfunc _ready():\n\tpass") != "":
+		o.free()
+		return _fail(name, "class_name yokken boş dönmeli")
+	o.free()
+	return _ok(name)
 
 
 static func _test_build_plan_no_bridge() -> Dictionary:

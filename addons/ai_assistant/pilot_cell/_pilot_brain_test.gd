@@ -20,6 +20,7 @@ static func run_all() -> Array:
 	# RolePrompts
 	results.append(_b("Brain: Prompts", _test_prompts_all_roles()))
 	results.append(_b("Brain: Prompts", _test_prompts_system()))
+	results.append(_b("Brain: Prompts", _test_prompts_godot4_guard()))
 	results.append(_b("Brain: Prompts", _test_prompts_undefined()))
 	results.append(_b("Brain: Prompts", _test_prompts_purpose()))
 	results.append(_b("Brain: Prompts", _test_prompts_task_message()))
@@ -80,6 +81,24 @@ static func _test_prompts_system() -> Dictionary:
 	# Ortak kısıt eklenmeli — Godot/Forward Mobile geçmeli
 	if not prompt.contains("Godot"):
 		return _fail(name, "sistem promptu ortak kısıt içermeli")
+	return _ok(name)
+
+
+static func _test_prompts_godot4_guard() -> Dictionary:
+	var name := "Sistem promptu Godot 4.6 API sözleşmesi içerir"
+	var prompt: String = AIRolePrompts.system_prompt(
+		AICellRoles.Role.CODE_ENGINEER
+	)
+	# Telefon testindeki Godot-3 hatalarının karşılıkları geçmeli.
+	for needle in ["await", "instantiate()", "create_tween()",
+			"CharacterBody2D", "class_name"]:
+		if not prompt.contains(needle):
+			return _fail(name, "G4 kuralı eksik: " + needle)
+	# Architect de hizalı olmalı (tasarım G4 desenleriyle).
+	if not AIRolePrompts.system_prompt(
+		AICellRoles.Role.ARCHITECT
+	).contains("create_tween()"):
+		return _fail(name, "Architect promptu G4 sözleşmesiz")
 	return _ok(name)
 
 

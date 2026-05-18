@@ -48,6 +48,7 @@ var _bp_idx: int = 0
 var _bp_paths: Array = []
 var _bp_failed: Array = []
 var _bp_project: String = ""
+var _bp_classes: Array = []
 
 
 func _init() -> void:
@@ -222,6 +223,7 @@ func run_build_plan(
 	_bp_idx = 0
 	_bp_paths = []
 	_bp_failed = []
+	_bp_classes = []
 
 	# Yardımcı köprü: decomposer + zincir SIRAYLA kullanır (tek köprü,
 	# çakışmasız — decomposer biter, sonra zincir başlar).
@@ -288,9 +290,28 @@ func _run_next_task() -> void:
 		+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
 		+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
 	)
+	if not _bp_classes.is_empty():
+		instruction += (
+			"\n\nZATEN ÜRETİLEN SINIFLAR (atıf gerekiyorsa BU gerçek "
+			+ "adları kullan, uydurma):\n" + "\n".join(_bp_classes)
+		)
 	if not _bp_project.strip_edges().is_empty():
 		instruction += "\n\n" + _bp_project
 	_chain.run(instruction, _bp_model)
+
+
+## Üretilen koddan class_name'i çıkarır (varsa). Görevler arası
+## tutarlılık için — sonraki görev gerçek sınıfa atıf yapabilsin.
+func _scan_class_name(code: String) -> String:
+	for raw_line in code.split("\n"):
+		var line: String = str(raw_line).strip_edges()
+		if line.begins_with("class_name "):
+			var rest: String = line.substr(11).strip_edges()
+			var stop: int = rest.find(" ")
+			if stop != -1:
+				rest = rest.substr(0, stop)
+			return rest.strip_edges()
+	return ""
 
 
 func _on_chain_completed(res: Dictionary) -> void:
@@ -317,6 +338,13 @@ func _on_chain_completed(res: Dictionary) -> void:
 		if bool(applied.get("ok", false)):
 			_planner.mark_completed(str(t["node_id"]))
 			_bp_paths.append(str(applied.get("path", t["target_file"])))
+			var cls: String = _scan_class_name(
+				extract_code(str(res.get("content", "")))
+			)
+			if not cls.is_empty():
+				_bp_classes.append(
+					"- %s (%s)" % [cls, str(t["target_file"])]
+				)
 		else:
 			_bp_failed.append({
 				"title": str(t["title"]),

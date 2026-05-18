@@ -30,6 +30,33 @@ const COMMON_CONSTRAINTS: String = (
 	+ "Cevabın net, yapılandırılmış ve uygulanabilir olsun."
 )
 
+## GODOT 4.6 API SÖZLEŞMESI — telefon testinde üretilen kod Godot 3
+## API'siyle reddedildi (Verifier syntactic). Bu yasak→karşılık
+## listesi her role eklenir; üretilen kod Godot 4.6'da DERLENMELİDİR.
+const GODOT4_API_GUARD: String = (
+	"KESİN GODOT 4.6 KURALLARI (Godot 3 API YASAK — aksi derlenmez):\n"
+	+ "- yield(x,\"s\") → await x.s\n"
+	+ "- ResourceInteractiveLoader / ResourceLoader.load_interactive() "
+	+ "YASAK → preload()/load(), gerekirse "
+	+ "ResourceLoader.load_threaded_request()+load_threaded_get()\n"
+	+ "- Tween Node DEĞİL: Tween.new()+add_child YASAK → "
+	+ "get_tree().create_tween() veya create_tween()\n"
+	+ "- Sinyal: x.connect(\"s\",o,\"m\") → x.s.connect(o.m); "
+	+ "emit_signal(\"s\",a) → s.emit(a)\n"
+	+ "- @export var / @onready var (eski export()/onready YASAK); "
+	+ "setget YOK → get:/set: accessor\n"
+	+ "- KinematicBody2D/3D → CharacterBody2D/3D; move_and_slide() "
+	+ "argümansız, önce `velocity` ata\n"
+	+ "- .instance() → .instantiate(); .empty() → .is_empty(); "
+	+ "PoolXArray → PackedXArray; OS.get_ticks_msec() → "
+	+ "Time.get_ticks_msec()\n"
+	+ "- Doğru `extends` taban tipi; üretilen sınıfa `class_name` ver; "
+	+ "başka dosyadaki sınıfa atıfta O dosyanın gerçek class_name'ini "
+	+ "kullan (uydurma).\n"
+	+ "- YENİ dosya üretiminde: TAM, tek parça, kendi başına derlenen "
+	+ "Godot 4.6 GDScript ver (SEARCH/REPLACE değil)."
+)
+
 ## Her rol için sistem promptu — rolün kimliği ve uzmanlığı.
 const SYSTEM_PROMPTS: Dictionary = {
 	AICellRoles.Role.PRODUCT_MANAGER:
@@ -104,7 +131,7 @@ static func system_prompt(role: int) -> String:
 	var base: String = SYSTEM_PROMPTS.get(role, "")
 	if base.is_empty():
 		return ""
-	return base + "\n\n" + COMMON_CONSTRAINTS
+	return base + "\n\n" + COMMON_CONSTRAINTS + "\n\n" + GODOT4_API_GUARD
 
 
 ## Bir rolün sistem promptu tanımlı mı?
