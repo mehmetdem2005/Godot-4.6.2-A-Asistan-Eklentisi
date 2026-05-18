@@ -77,18 +77,18 @@ func verify(
 		return result
 
 	# --- 3. Güvenli tabanlarda GERÇEK örnekleme (_init çalışır) ---
+	# new() YALNIZ argümansız _init için çağrılır: zorunlu argümanlı
+	# _init'te new() motor hatası verir (geçerli kod — KOD DEFEKTİ
+	# DEĞİL; ayrıca hata yürütmeyi bozar). Otoriter runtime kanıtı
+	# zaten reload+can_instantiate+taban çözümü; örnekleme bonustur.
 	var instantiated: bool = false
-	if SAFE_INSTANTIATE_BASES.has(base_type):
+	if SAFE_INSTANTIATE_BASES.has(base_type) \
+			and not _init_requires_args(script):
 		var inst: Variant = script.new()
-		if inst == null:
-			result.mark_fail(
-				"Runtime: new() null döndü (taban %s) — örnekleme "
-				% base_type + "başarısız"
-			)
-			return result
-		instantiated = true
-		# RefCounted/Resource: referans bırakılınca otomatik serbest.
-		inst = null
+		if inst != null:
+			instantiated = true
+			# RefCounted/Resource: referans bırakılınca otomatik serbest.
+			inst = null
 
 	result.mark_pass(
 		{
@@ -108,3 +108,17 @@ func verify(
 		]
 	)
 	return result
+
+
+## script._init zorunlu (varsayılansız) argüman istiyor mu?
+## İstiyorsa new() çağrılmaz — motor hatası verir (geçerli kod olsa
+## bile) ve yürütmeyi bozar. _init yoksa argümansız Object init
+## (güvenli) → false.
+func _init_requires_args(script: GDScript) -> bool:
+	for m in script.get_script_method_list():
+		if str(m.get("name", "")) != "_init":
+			continue
+		var args: Array = m.get("args", [])
+		var defaults: Array = m.get("default_args", [])
+		return args.size() - defaults.size() > 0
+	return false

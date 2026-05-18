@@ -47,6 +47,7 @@ static func run_all() -> Array:
 	results.append(_b("Verify: Runtime", _test_runtime_broken_fails()))
 	results.append(_b("Verify: Runtime", _test_runtime_single_level()))
 	results.append(_b("Verify: Runtime", _test_runtime_implemented()))
+	results.append(_b("Verify: Runtime", _test_runtime_init_args_ok()))
 
 	return results
 
@@ -424,6 +425,25 @@ static func _test_runtime_single_level() -> Dictionary:
 		return _fail(name, "yanlış seviye döndü")
 	if r.outcome == AIVerificationResult.Outcome.SKIP:
 		return _fail(name, "RUNTIME artık SKIP olmamalı (uygulandı)")
+	return _ok(name)
+
+
+static func _test_runtime_init_args_ok() -> Dictionary:
+	var name := "Runtime: _init zorunlu argümanlı geçerli kod FAIL olmaz"
+	var rv := AIRuntimeVerifier.new()
+	# Geçerli RefCounted ama new() argüman ister → null döner; bu bir
+	# KOD DEFEKTİ DEĞİL, yanlışlıkla FAIL edilmemeli (onarım döngüsü
+	# tetiklenmesin).
+	var src := (
+		"@tool\nextends RefCounted\n"
+		+ "var v: int\n"
+		+ "func _init(p_v: int) -> void:\n\tv = p_v\n"
+	)
+	var r: AIVerificationResult = rv.verify(src, {"task_ref": "t1"})
+	if r.outcome == AIVerificationResult.Outcome.FAIL:
+		return _fail(name, "argümanlı _init yanlışlıkla FAIL: " + r.message)
+	if bool(r.evidence.get("instantiated", true)):
+		return _fail(name, "new() null'ken instantiated=false olmalı")
 	return _ok(name)
 
 
