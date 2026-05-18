@@ -38,7 +38,99 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Sahne", _test_verify_scene_text()))
 	results.append(_b("E2E: Sahne", _test_scene_target_skips_gd_verify()))
 	results.append(_b("E2E: Sahne", _test_scene_repair_instruction()))
+	results.append(_b("E2E: Cerrahi", _test_surgical_patch_applies()))
+	results.append(_b("E2E: Cerrahi", _test_surgical_reject_no_match()))
+	results.append(_b("E2E: Cerrahi", _test_surgical_missing_file()))
 	return results
+
+
+# ============================================================
+# CERRAHİ DÜZENLEME — SEARCH/REPLACE kablolaması (kodu baştan yazma)
+# ============================================================
+
+static func _test_surgical_patch_applies() -> Dictionary:
+	var name := (
+		"Cerrahi SEARCH/REPLACE: sadece eşleşen blok değişir, "
+		+ "tam dosya EZİLMEZ"
+	)
+	var o := _new()
+	var tpath := "res://game/scripts/__e2e_surgical__.gd"
+	var seed := (
+		"extends Node\n\n\nfunc _ready() -> void:\n\tprint(\"eski\")\n"
+	)
+	var s0: Dictionary = o.apply_generated_code(
+		tpath, "```gdscript\n" + seed + "```", "CodeEngineer"
+	)
+	var patch := (
+		"<<<<<<< SEARCH\n\tprint(\"eski\")\n=======\n"
+		+ "\tprint(\"yeni\")\n>>>>>>> REPLACE\n"
+	)
+	var r: Dictionary = o.apply_generated_code(tpath, patch, "CodeEngineer")
+	o.free()
+	var final_txt := ""
+	if FileAccess.file_exists(tpath):
+		var f := FileAccess.open(tpath, FileAccess.READ)
+		final_txt = f.get_as_text()
+		f.close()
+		DirAccess.remove_absolute(tpath)
+	if not bool(s0["ok"]):
+		return _fail(name, "tohum dosya yazılamadı: " + str(s0["message"]))
+	if str(r["stage"]) != "executed" or not bool(r["ok"]):
+		return _fail(name, "cerrahi yama executed olmalı: %s / %s" % [
+			str(r["stage"]), str(r["message"])])
+	if not bool(r.get("surgical", false)):
+		return _fail(name, "surgical bayrağı true olmalı")
+	if not final_txt.contains("print(\"yeni\")"):
+		return _fail(name, "yeni satır yazılmadı")
+	if final_txt.contains("print(\"eski\")"):
+		return _fail(name, "eski satır kalmamalı (blok değişmeli)")
+	if not final_txt.contains("extends Node"):
+		return _fail(name, "dosyanın geri kalanı KORUNMALI (tam ezme yok)")
+	return _ok(name)
+
+
+static func _test_surgical_reject_no_match() -> Dictionary:
+	var name := "Cerrahi: SEARCH dosyada yoksa dürüst RET (sahte yok)"
+	var o := _new()
+	var tpath := "res://game/scripts/__e2e_surg_nomatch__.gd"
+	var seed := (
+		"extends Node\n\n\nfunc _ready() -> void:\n\tprint(\"a\")\n"
+	)
+	o.apply_generated_code(
+		tpath, "```gdscript\n" + seed + "```", "CodeEngineer"
+	)
+	var patch := (
+		"<<<<<<< SEARCH\n\tprint(\"YOK_BU_SATIR\")\n=======\n"
+		+ "\tprint(\"x\")\n>>>>>>> REPLACE\n"
+	)
+	var r: Dictionary = o.apply_generated_code(tpath, patch, "CodeEngineer")
+	o.free()
+	if FileAccess.file_exists(tpath):
+		DirAccess.remove_absolute(tpath)
+	if bool(r["ok"]):
+		return _fail(name, "eşleşmeyen SEARCH ok olmamalı")
+	if str(r["stage"]) != "surgical":
+		return _fail(name, "surgical aşamasında durmalı: " + str(r["stage"]))
+	if not str(r.get("failed_code", "")).contains("print(\"a\")"):
+		return _fail(name, "onarım için mevcut içerik failed_code'da olmalı")
+	return _ok(name)
+
+
+static func _test_surgical_missing_file() -> Dictionary:
+	var name := (
+		"Cerrahi: hedef dosya yoksa dürüst hata "
+		+ "(var olmayan dosya ezilmez)"
+	)
+	var o := _new()
+	var patch := "<<<<<<< SEARCH\nfoo\n=======\nbar\n>>>>>>> REPLACE\n"
+	var r: Dictionary = o.apply_generated_code(
+		"res://game/scripts/__e2e_surg_absent__.gd", patch, "CodeEngineer"
+	)
+	o.free()
+	if bool(r["ok"]) or str(r["stage"]) != "surgical":
+		return _fail(name, "olmayan dosyada surgical dürüst hata: "
+			+ str(r["stage"]))
+	return _ok(name)
 
 
 static func _test_scene_repair_instruction() -> Dictionary:

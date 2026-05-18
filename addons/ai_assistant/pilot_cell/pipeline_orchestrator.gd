@@ -132,7 +132,43 @@ func build_plan(goal_title: String, action_title: String) -> AIPlanNode:
 func apply_generated_code(
 	target_path: String, raw_content: String, role_name: String
 ) -> Dictionary:
-	var code: String = extract_code(raw_content)
+	# --- Kod çözümleme: CERRAHI (SEARCH/REPLACE) vs TAM dosya ---
+	# LLM "<<<<<<< SEARCH" bloğu verdiyse tüm dosyayı YENİDEN YAZMA —
+	# sadece eşleşen bölümü değiştir (kullanıcı isteği: "her seferinde
+	# kodu baştan yazma, sadece ilgili kısmı değiştir"). Mock policy:
+	# eşleşme yoksa/dosya yoksa sahte başarı yok — dürüst RET.
+	var surgical: bool = false
+	var blocks_applied: int = 0
+	var code: String
+	if raw_content.contains(AISearchReplaceHandler.SEARCH_MARKER):
+		var rd: Dictionary = _executor.read_existing(target_path)
+		if not bool(rd["ok"]):
+			return _stage(
+				"surgical", false,
+				"Cerrahi düzenleme: hedef dosya okunamadı (%s) — var "
+				% str(rd["error"])
+				+ "olmayan dosya için SEARCH/REPLACE değil tam içerik üret"
+			)
+		var existing: String = str(rd["content"])
+		var handler := AISearchReplaceHandler.new()
+		var ar: AISearchReplaceHandler.ApplyResult = handler.process(
+			existing, raw_content
+		)
+		if not ar.ok:
+			var reason: String = ar.rejected_reason
+			if reason.is_empty():
+				reason = ar.error
+			var dsr: Dictionary = _stage(
+				"surgical", false, "Cerrahi düzenleme reddedildi: " + reason
+			)
+			dsr["verify_detail"] = reason
+			dsr["failed_code"] = existing
+			return dsr
+		surgical = true
+		blocks_applied = ar.blocks_applied
+		code = ar.new_content
+	else:
+		code = extract_code(raw_content)
 	if code.strip_edges().is_empty():
 		return _stage("extract", false, "LLM çıktısından kod çıkarılamadı")
 
@@ -204,6 +240,8 @@ func apply_generated_code(
 	)
 	out["path"] = target_path
 	out["code_length"] = code.length()
+	out["surgical"] = surgical
+	out["blocks_applied"] = blocks_applied
 	return out
 
 

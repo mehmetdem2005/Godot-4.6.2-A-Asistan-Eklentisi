@@ -64,6 +64,14 @@ func initialize() -> Dictionary:
 	}
 
 
+## Mevcut bir dosyanın içeriğini güvenli okur (cerrahi düzenleme için —
+## Pipeline, tüm dosyayı EZMEDEN SEARCH/REPLACE uygulayabilsin diye
+## önce mevcut içeriği buradan okur). FS'e dokunan tek nokta yine
+## SandboxedFileOp'tur (PathGuard korumalı). Dönen: {ok, content, error}
+func read_existing(path: String) -> Dictionary:
+	return _file_op.read_file(path)
+
+
 # ============================================================
 # RİSK DEĞERLENDİRME
 # ============================================================
