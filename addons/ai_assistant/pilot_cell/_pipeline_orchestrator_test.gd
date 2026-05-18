@@ -27,7 +27,24 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Çekirdek", _test_apply_empty()))
 	results.append(_b("E2E: HITL", _test_hitl_gate_blocks()))
 	results.append(_b("E2E: Durum", _test_no_bridge()))
+	results.append(_b("E2E: Sohbet", _test_chat_no_bridge()))
 	return results
+
+
+static func _test_chat_no_bridge() -> Dictionary:
+	var name := "Köprüsüz run_chat dürüst başarısızlık"
+	var o := _new()
+	var captured: Array = []
+	o.pipeline_completed.connect(func(res: Dictionary) -> void:
+		captured.append(res)
+	)
+	var started: bool = o.run_chat("merhaba")
+	o.free()
+	if started:
+		return _fail(name, "köprü yokken başlamamalı")
+	if captured.is_empty() or bool(captured[0]["ok"]):
+		return _fail(name, "bridge aşamasında dürüst hata dönmeli")
+	return _ok(name)
 
 
 static func _b(batch: String, result: Dictionary) -> Dictionary:

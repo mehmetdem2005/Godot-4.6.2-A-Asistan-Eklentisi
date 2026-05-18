@@ -19,6 +19,8 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Görev", _test_key_autoenables_live()))
 	results.append(_b("Panel: Görev", _test_run_ready()))
 	results.append(_b("Panel: Görev", _test_target_path()))
+	results.append(_b("Panel: Niyet", _test_intent_chat()))
+	results.append(_b("Panel: Niyet", _test_intent_build()))
 	results.append(_b("Panel: Sekme", _test_nine_tabs()))
 	results.append(_b("Panel: Durum", _test_status_and_result()))
 	results.append(_b("Panel: Model", _test_model_default()))
@@ -141,6 +143,35 @@ static func _test_target_path() -> Dictionary:
 # ============================================================
 # SEKME (#4) + DURUM (#2)
 # ============================================================
+
+static func _test_intent_chat() -> Dictionary:
+	var name := "Selam/soru → CHAT (kod hattına girmez)"
+	var c := _c()
+	var chat: Array = [
+		"merhaba", "selam", "ne", "nasılsın?", "ne yapabilirsin",
+		"teşekkürler", "kimsin",
+	]
+	for m in chat:
+		if c.classify_intent(m) != AIMainPanelController.Intent.CHAT:
+			return _fail(name, "CHAT beklendi: '%s'" % m)
+	return _ok(name)
+
+
+static func _test_intent_build() -> Dictionary:
+	var name := "Üretim isteği → BUILD (kod hattı)"
+	var c := _c()
+	var build: Array = [
+		"ekrana merhaba yazan bir script üret",
+		"bana bir node oluştur",
+		"make me a node",
+		"bir platform oyunu yap",
+		"bir shader yaz:",
+	]
+	for m in build:
+		if c.classify_intent(m) != AIMainPanelController.Intent.BUILD:
+			return _fail(name, "BUILD beklendi: '%s'" % m)
+	return _ok(name)
+
 
 static func _test_nine_tabs() -> Dictionary:
 	var name := "9 sekme erişilebilir"

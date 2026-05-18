@@ -34,6 +34,7 @@ var _planner: AIHierarchicalPlanner = null
 
 var _active_path: String = ""
 var _active_role_name: String = ""
+var _chat_mode: bool = false
 
 
 func _init() -> void:
@@ -145,6 +146,7 @@ func run_task(
 		))
 		return false
 
+	_chat_mode = false
 	build_plan(goal_title, "Yaz: " + target_path)
 	_active_path = target_path
 	_active_role_name = AICellRoles.role_name(role)
@@ -156,12 +158,34 @@ func run_task(
 	return _bridge.think_live(role, instruction, {}, model)
 
 
+## Doğal SOHBET — kod hattı YOK (Verifier/HITL/Executor atlanır).
+## Sıradan mesaj/soru için: LLM yanıtı doğrudan döner, dosya yazılmaz.
+## Sonuç 'pipeline_completed' ile gelir (stage="chat").
+func run_chat(message: String, model: String = "") -> bool:
+	if _bridge == null:
+		_emit_done(_stage("bridge", false, "Canlı köprü bağlı değil"))
+		return false
+
+	_chat_mode = true
+	if not _bridge.thought_completed.is_connected(_on_thought):
+		_bridge.thought_completed.connect(_on_thought)
+
+	pipeline_progress.emit("Asistan yanıtlıyor (canlı)...")
+	return _bridge.think_chat(message, model)
+
+
 func _on_thought(thought: Dictionary) -> void:
 	if not bool(thought.get("ok", false)):
 		_emit_done(_stage(
 			"llm", false,
 			"LLM cevabı alınamadı: " + str(thought.get("status_note", ""))
 		))
+		return
+	if _chat_mode:
+		var chat: Dictionary = _stage(
+			"chat", true, str(thought.get("content", ""))
+		)
+		_emit_done(chat)
 		return
 	var result: Dictionary = apply_generated_code(
 		_active_path, str(thought.get("content", "")),

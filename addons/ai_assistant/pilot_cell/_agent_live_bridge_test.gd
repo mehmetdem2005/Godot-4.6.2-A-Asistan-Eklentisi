@@ -25,7 +25,26 @@ static func run_all() -> Array:
 	results.append(_b("LiveBridge: Eşleme", _test_finalize_429()))
 	results.append(_b("LiveBridge: Eşleme", _test_finalize_no_router()))
 	results.append(_b("LiveBridge: Mock", _test_finalize_mock_policy()))
+	results.append(_b("LiveBridge: Sohbet", _test_chat_no_router_fails()))
 	return results
+
+
+static func _test_chat_no_router_fails() -> Dictionary:
+	var name := "think_chat router yokken açık başarısızlık (sahte yok)"
+	var bridge := AIAgentLiveBridge.new()
+	var captured: Array = []
+	bridge.thought_completed.connect(func(r: Dictionary) -> void:
+		captured.append(r)
+	)
+	var started: bool = bridge.think_chat("merhaba")
+	if started:
+		bridge.free()
+		return _fail(name, "router yokken başlatılmamalı")
+	if captured.is_empty() or bool(captured[0]["ok"]):
+		bridge.free()
+		return _fail(name, "router yokken dürüst hata dönmeli")
+	bridge.free()
+	return _ok(name)
 
 
 static func _b(batch: String, result: Dictionary) -> Dictionary:
