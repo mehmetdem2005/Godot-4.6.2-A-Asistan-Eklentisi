@@ -236,6 +236,10 @@ static func run_all() -> Dictionary:
 	for scan_result in AIProjectScannerTest.run_all():
 		results.append(scan_result)
 
+	# --- PHASE 36: Editör Mutasyon Planlayıcı (sahne/property/script) ---
+	for scene_act_result in AISceneActionPlannerTest.run_all():
+		results.append(scene_act_result)
+
 	return _build_report(results)
 
 

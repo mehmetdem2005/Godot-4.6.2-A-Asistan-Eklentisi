@@ -479,8 +479,11 @@ static func _test_engine_unsupported() -> Dictionary:
 	var name := "Engine desteklenmeyen tipi SKIP eder"
 	var engine := AIExecutorEngine.new()
 	var node: AIPlanNode = _make_action_node()
-	# NODE_ADD Layer 4'te desteklenmiyor
-	var spec: AIActionSpec = _make_spec(AIActionSpec.ActionType.NODE_ADD, {})
+	# NODE_REPARENT Layer 4'te hâlâ desteklenmiyor (NODE_ADD/REMOVE/
+	# PROPERTY_SET/SCRIPT_ATTACH/PROJECT_SETTING artık editör işlemi)
+	var spec: AIActionSpec = _make_spec(
+		AIActionSpec.ActionType.NODE_REPARENT, {}
+	)
 	var result: AIVerificationResult = engine.execute_action(node, spec)
 	if result.outcome != AIVerificationResult.Outcome.SKIP:
 		return _fail(name, "desteklenmeyen tip SKIP olmalı (sahte başarı yok)")

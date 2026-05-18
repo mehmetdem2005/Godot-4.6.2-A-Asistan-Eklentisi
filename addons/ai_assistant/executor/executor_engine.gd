@@ -133,6 +133,12 @@ func execute_action(node: AIPlanNode, action_spec: AIActionSpec) -> AIVerificati
 		AIActionSpec.ActionType.CUSTOM:
 			# CUSTOM: params.op alanı alt-işlemi belirler (örn. taşıma)
 			return _exec_custom(action_spec, result)
+		AIActionSpec.ActionType.NODE_ADD, \
+		AIActionSpec.ActionType.NODE_REMOVE, \
+		AIActionSpec.ActionType.PROPERTY_SET, \
+		AIActionSpec.ActionType.SCRIPT_ATTACH, \
+		AIActionSpec.ActionType.PROJECT_SETTING:
+			return _exec_editor_action(action_spec, result)
 		_:
 			# Desteklenmeyen tip — SAHTE BAŞARI YOK (mock policy)
 			result.outcome = AIVerificationResult.Outcome.SKIP
@@ -285,6 +291,58 @@ func _exec_mkdir(spec: AIActionSpec, result: AIVerificationResult) -> AIVerifica
 		result.message = "Klasör oluşturuldu: %s" % path
 	else:
 		result.mark_fail("make_dir başarısız: %s" % op["error"])
+	return result
+
+
+## Editör mutasyon işlemleri (NODE_ADD/REMOVE, PROPERTY_SET,
+## SCRIPT_ATTACH, PROJECT_SETTING). Karar: SceneActionPlanner (saf,
+## test edilmiş). Uygulama: EditorActionApplier (canlı editör — ince).
+## Plan geçmezse FAIL. Editör yoksa SKIP (dürüst — sahte "yapıldı"
+## YOK). Uygulanırsa PASS.
+func _exec_editor_action(
+	spec: AIActionSpec, result: AIVerificationResult
+) -> AIVerificationResult:
+	var planner := AISceneActionPlanner.new()
+	var plan: Dictionary = planner.plan_for(spec.action_type, spec.params)
+	if not bool(plan["ok"]):
+		result.mark_fail("Editör action geçersiz: " + str(plan["reason"]))
+		return result
+
+	var applier := AIEditorActionApplier.new()
+	var out: Dictionary
+	match spec.action_type:
+		AIActionSpec.ActionType.NODE_ADD:
+			out = applier.apply_node_add(plan)
+		AIActionSpec.ActionType.NODE_REMOVE:
+			out = applier.apply_node_remove(plan)
+		AIActionSpec.ActionType.PROPERTY_SET:
+			out = applier.apply_property_set(plan)
+		AIActionSpec.ActionType.SCRIPT_ATTACH:
+			out = applier.apply_script_attach(plan)
+		AIActionSpec.ActionType.PROJECT_SETTING:
+			out = applier.apply_project_setting(plan)
+		_:
+			result.mark_fail("Editör action yönlendirilemedi")
+			return result
+
+	if not bool(out["available"]):
+		result.outcome = AIVerificationResult.Outcome.SKIP
+		result.message = (
+			"Editör bağlamı yok — bu işlem Godot editöründe çalışır: %s"
+			% str(out["reason"])
+		)
+		return result
+	if bool(out["ok"]):
+		result.mark_pass(
+			{
+				"action": spec.action_type_name(),
+				"detail": str(out["reason"]),
+			},
+			"editor_action"
+		)
+		result.message = str(out["reason"])
+	else:
+		result.mark_fail("Editör uygulaması başarısız: " + str(out["reason"]))
 	return result
 
 
