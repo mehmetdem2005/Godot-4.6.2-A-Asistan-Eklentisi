@@ -41,6 +41,13 @@ static func run_all() -> Array:
 	results.append(_b("Verify: Engine", _test_engine_unimplemented_level()))
 	results.append(_b("Verify: Engine", _test_engine_summarize()))
 
+	# RuntimeVerifier (AAA — gerçek motor yükleme/örnekleme)
+	results.append(_b("Verify: Runtime", _test_runtime_clean_instantiates()))
+	results.append(_b("Verify: Runtime", _test_runtime_node_safe()))
+	results.append(_b("Verify: Runtime", _test_runtime_broken_fails()))
+	results.append(_b("Verify: Runtime", _test_runtime_single_level()))
+	results.append(_b("Verify: Runtime", _test_runtime_implemented()))
+
 	return results
 
 
@@ -340,14 +347,91 @@ static func _test_engine_single_level() -> Dictionary:
 static func _test_engine_unimplemented_level() -> Dictionary:
 	var name := "Engine uygulanmamış seviye SKIP"
 	var engine := AIVerifierEngine.new()
-	# RUNTIME henüz uygulanmadı — SKIP dönmeli (sahte PASS yok)
+	# PERFORMANCE henüz uygulanmadı — SKIP dönmeli (sahte PASS yok).
+	# (RUNTIME artık AAA gerçek doğrulayıcı — ayrı testlerde.)
 	var result: AIVerificationResult = engine.verify_single_level(
 		_clean_source(),
-		AIVerificationResult.VerifyLevel.RUNTIME,
+		AIVerificationResult.VerifyLevel.PERFORMANCE,
 		{"task_ref": "t1"}
 	)
 	if result.outcome != AIVerificationResult.Outcome.SKIP:
 		return _fail(name, "uygulanmamış seviye SKIP olmalı")
+	return _ok(name)
+
+
+# ============================================================
+# RUNTIME VERIFIER — AAA gerçek motor yükleme/örnekleme
+# ============================================================
+
+static func _test_runtime_clean_instantiates() -> Dictionary:
+	var name := "Runtime: RefCounted kodu gerçekten örneklenir (PASS)"
+	var rv := AIRuntimeVerifier.new()
+	var src := (
+		"@tool\nextends RefCounted\n"
+		+ "var x: int = 0\n"
+		+ "func _init() -> void:\n\tx = 41\n"
+		+ "func add() -> int:\n\treturn x + 1\n"
+	)
+	var r: AIVerificationResult = rv.verify(src, {"task_ref": "t1"})
+	if r.outcome != AIVerificationResult.Outcome.PASS:
+		return _fail(name, "temiz RefCounted PASS olmalı: " + r.message)
+	if not bool(r.evidence.get("instantiated", false)):
+		return _fail(name, "RefCounted gerçekten örneklenmeliydi")
+	if str(r.evidence.get("base_type", "")) != "RefCounted":
+		return _fail(name, "taban tipi RefCounted çözülmeliydi")
+	return _ok(name)
+
+
+static func _test_runtime_node_safe() -> Dictionary:
+	var name := "Runtime: Node türevi örneklenebilir ama new() çağrılmaz"
+	var rv := AIRuntimeVerifier.new()
+	var src := (
+		"@tool\nextends Node\n"
+		+ "func _ready() -> void:\n\tpass\n"
+	)
+	var r: AIVerificationResult = rv.verify(src, {"task_ref": "t1"})
+	if r.outcome != AIVerificationResult.Outcome.PASS:
+		return _fail(name, "geçerli Node PASS olmalı: " + r.message)
+	# Güvenli sınırlama: Node new() ile çalıştırılmaz (yan etki/asılma).
+	if bool(r.evidence.get("instantiated", false)):
+		return _fail(name, "Node new() ile örneklenMEmeliydi (güvenlik)")
+	return _ok(name)
+
+
+static func _test_runtime_broken_fails() -> Dictionary:
+	var name := "Runtime: yüklenemeyen kod dürüstçe FAIL"
+	var rv := AIRuntimeVerifier.new()
+	# Geçerli sözdizimi ama çözülemeyen extends → motor yükleyemez.
+	var src := "@tool\nextends BuYokBirSinifXyz\nfunc f() -> void:\n\tpass\n"
+	var r: AIVerificationResult = rv.verify(src, {"task_ref": "t1"})
+	if r.outcome == AIVerificationResult.Outcome.PASS:
+		return _fail(name, "çözülemeyen extends PASS olmamalı")
+	var empty: AIVerificationResult = rv.verify("   ", {"task_ref": "t1"})
+	if empty.outcome == AIVerificationResult.Outcome.PASS:
+		return _fail(name, "boş kaynak PASS olmamalı")
+	return _ok(name)
+
+
+static func _test_runtime_single_level() -> Dictionary:
+	var name := "Engine RUNTIME tek seviye doğrular"
+	var engine := AIVerifierEngine.new()
+	var r: AIVerificationResult = engine.verify_single_level(
+		"@tool\nextends RefCounted\nfunc f() -> int:\n\treturn 1\n",
+		AIVerificationResult.VerifyLevel.RUNTIME,
+		{"task_ref": "t1"}
+	)
+	if r.level != AIVerificationResult.VerifyLevel.RUNTIME:
+		return _fail(name, "yanlış seviye döndü")
+	if r.outcome == AIVerificationResult.Outcome.SKIP:
+		return _fail(name, "RUNTIME artık SKIP olmamalı (uygulandı)")
+	return _ok(name)
+
+
+static func _test_runtime_implemented() -> Dictionary:
+	var name := "implemented_levels runtime'ı içerir"
+	var engine := AIVerifierEngine.new()
+	if not engine.implemented_levels().has("runtime"):
+		return _fail(name, "runtime uygulanmış seviyelerde olmalı")
 	return _ok(name)
 
 

@@ -18,6 +18,7 @@ extends RefCounted
 ## Aktif doğrulayıcılar — sıralı.
 var _syntactic: AISyntacticVerifier
 var _semantic: AISemanticVerifier
+var _runtime: AIRuntimeVerifier
 
 ## Bir seviye FAIL verince sonrakiler atlansın mı? Varsayılan: EVET.
 ## (Kademeli doğrulama — bozuk kodu derinlemesine incelemek boşa iş.)
@@ -27,6 +28,7 @@ var cascade_stop_on_fail: bool = true
 func _init() -> void:
 	_syntactic = AISyntacticVerifier.new()
 	_semantic = AISemanticVerifier.new()
+	_runtime = AIRuntimeVerifier.new()
 
 
 # ============================================================
@@ -46,9 +48,13 @@ func verify(source_code: String, context: Dictionary = {}) -> Dictionary:
 	var failed_level: String = ""
 
 	# Sıralı seviye listesi — sıra önemli (syntactic önce)
+	# Sıra önemli: syntactic → semantic → runtime. Kademeli durma
+	# (cascade_stop_on_fail) sayesinde runtime YALNIZ derlenmiş +
+	# anlamsal temiz kodda çalışır (güvenli — bozuk kod örneklenmez).
 	var levels: Array = [
 		{"name": "syntactic", "verifier": _syntactic},
 		{"name": "semantic", "verifier": _semantic},
+		{"name": "runtime", "verifier": _runtime},
 	]
 
 	for level_info in levels:
@@ -83,8 +89,10 @@ func verify_single_level(
 			return _syntactic.verify(source_code, context)
 		AIVerificationResult.VerifyLevel.SEMANTIC:
 			return _semantic.verify(source_code, context)
+		AIVerificationResult.VerifyLevel.RUNTIME:
+			return _runtime.verify(source_code, context)
 		_:
-			# RUNTIME / BEHAVIORAL / PERFORMANCE — henüz uygulanmadı
+			# BEHAVIORAL / PERFORMANCE — henüz uygulanmadı
 			var result := AIVerificationResult.create(
 				level, context.get("task_ref", "?")
 			)
@@ -159,4 +167,4 @@ func summarize(verify_result: Dictionary) -> String:
 
 ## Hangi seviyelerin gerçekten uygulandığını döndürür.
 func implemented_levels() -> PackedStringArray:
-	return PackedStringArray(["syntactic", "semantic"])
+	return PackedStringArray(["syntactic", "semantic", "runtime"])
