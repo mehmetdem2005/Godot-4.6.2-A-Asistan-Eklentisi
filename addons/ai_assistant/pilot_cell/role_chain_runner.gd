@@ -30,6 +30,13 @@ const BASE_CHAIN: Array = [
 	AICellRoles.Role.REVIEWER,
 ]
 
+## Kod üreten roller için zorunlu model. deepseek-reasoner kod
+## adımında token bütçesini düşünce zincirine harcayıp final içeriği
+## BOŞ döndürüyor ("Sağlayıcı yanıtı kullanılamadı" — telefon testi
+## kanıtı). deepseek-chat kod emisyonu için doğru araç; planlama/
+## inceleme kullanıcının seçtiği modelde kalır.
+const CODE_MODEL: String = "deepseek-chat"
+
 var _bridge: AIAgentLiveBridge = null
 var _task: String = ""
 var _model: String = ""
@@ -73,7 +80,12 @@ func run(task: String, model: String = "") -> bool:
 func _dispatch_step() -> bool:
 	var role: int = int(_steps[_idx])
 	chain_progress.emit(AICellRoles.role_name(role) + " düşünüyor...")
-	return _bridge.think_live(role, _task, _context, _model)
+	# Kod üreten roller deepseek-chat'e zorlanır (reasoner boş-içerik
+	# hatası); diğer roller kullanıcının seçtiği modelde kalır.
+	var model: String = _model
+	if AICellRoles.is_code_generating(role):
+		model = CODE_MODEL
+	return _bridge.think_live(role, _task, _context, model)
 
 
 func _on_thought(thought: Dictionary) -> void:

@@ -47,6 +47,7 @@ var _bp_tasks: Array = []
 var _bp_idx: int = 0
 var _bp_paths: Array = []
 var _bp_failed: Array = []
+var _bp_project: String = ""
 
 
 func _init() -> void:
@@ -176,7 +177,8 @@ func run_task(
 ## history: çok-turlu hafıza [{role, content}] (eski→yeni). Boş =
 ## eski stateless davranış (geriye uyumlu).
 func run_chat(
-	message: String, model: String = "", history: Array = []
+	message: String, model: String = "", history: Array = [],
+	project_context: String = ""
 ) -> bool:
 	if _bridge == null:
 		_emit_done(_stage("bridge", false, "Canlı köprü bağlı değil"))
@@ -187,7 +189,7 @@ func run_chat(
 		_bridge.thought_completed.connect(_on_thought)
 
 	pipeline_progress.emit("Asistan yanıtlıyor (canlı)...")
-	return _bridge.think_chat(message, model, history)
+	return _bridge.think_chat(message, model, history, project_context)
 
 
 ## ASENKRON ÇOK-ADIMLI ZİNCİR (Plan C): büyük BUILD isteği →
@@ -198,7 +200,8 @@ func run_chat(
 ## Kısmi başarısızlık: o görev failed_tasks'e girer, döngü sürer.
 ## HITL onay isterse döngü DURUR (kısmi sonuç + needs_approval).
 func run_build_plan(
-	goal_title: String, instruction: String, model: String = ""
+	goal_title: String, instruction: String, model: String = "",
+	project_context: String = ""
 ) -> bool:
 	if _bridge == null:
 		_emit_done(_stage("bridge", false, "Canlı köprü bağlı değil"))
@@ -214,6 +217,7 @@ func run_build_plan(
 	_bp_active = true
 	_bp_goal = instruction
 	_bp_model = model
+	_bp_project = project_context
 	_bp_tasks = []
 	_bp_idx = 0
 	_bp_paths = []
@@ -237,7 +241,7 @@ func run_build_plan(
 	_chain.chain_completed.connect(_on_chain_completed)
 
 	pipeline_progress.emit("İstek alt görevlere bölünüyor...")
-	return _decomposer.decompose(instruction, model)
+	return _decomposer.decompose(instruction, model, _bp_project)
 
 
 func _on_chain_progress(step: String) -> void:
@@ -284,6 +288,8 @@ func _run_next_task() -> void:
 		+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
 		+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
 	)
+	if not _bp_project.strip_edges().is_empty():
+		instruction += "\n\n" + _bp_project
 	_chain.run(instruction, _bp_model)
 
 

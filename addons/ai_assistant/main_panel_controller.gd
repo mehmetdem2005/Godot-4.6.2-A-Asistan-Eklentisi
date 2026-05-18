@@ -178,6 +178,12 @@ func conversation_history(
 	return clean
 
 
+## Asistanın GERÇEK proje görünümü (salt-okunur). Sohbet/üretim
+## bağlamına gömülür — "erişimim yok" sorunu giderilir.
+func project_context() -> String:
+	return AIProjectScanner.new().project_summary()
+
+
 ## Sohbet olay yayıncısı — workspace Canlı Akış sekmesi buna bağlanır.
 func feed() -> AIFeedEmitter:
 	return _feed
