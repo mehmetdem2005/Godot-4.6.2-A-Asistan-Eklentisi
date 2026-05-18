@@ -133,9 +133,11 @@ func apply_generated_code(
 
 ## ASENKRON tam zincir: görev → plan → CANLI LLM → çekirdek.
 ## Sonuç 'pipeline_completed' sinyali ile gelir.
+## model: boş değilse LLM isteği o modele sabitlenir (UI model seçimi);
+## boş = adapter varsayılanı (geriye uyumlu).
 func run_task(
 	goal_title: String, target_path: String,
-	instruction: String, role: int
+	instruction: String, role: int, model: String = ""
 ) -> bool:
 	if _bridge == null:
 		_emit_done(_stage(
@@ -151,7 +153,7 @@ func run_task(
 		_bridge.thought_completed.connect(_on_thought)
 
 	pipeline_progress.emit("Ajan düşünüyor (canlı)...")
-	return _bridge.think_live(role, instruction)
+	return _bridge.think_live(role, instruction, {}, model)
 
 
 func _on_thought(thought: Dictionary) -> void:

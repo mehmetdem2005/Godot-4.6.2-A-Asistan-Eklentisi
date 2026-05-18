@@ -64,19 +64,26 @@ func attach_transport(transport: AIHTTPTransport) -> void:
 ## Bir rol + görev için AIProviderRequest kurar.
 ## Brain'i HİÇ değiştirmeden onun kendi kurulumunu yeniden kullanır:
 ## think(live_mode=false) zaten prepared_request döndürür.
+## model: boş değilse istek o belirli modele sabitlenir (UI model seçimi);
+## boş = router/adapter varsayılanını kullanır (geriye uyumlu).
 func build_request_for(
-	role: int, task: String, context: Dictionary = {}
+	role: int, task: String, context: Dictionary = {},
+	model: String = ""
 ) -> AIProviderRequest:
 	var brain := AIAgentBrain.new()
 	var thought: AIAgentBrain.ThoughtResult = brain.think(role, task, context)
-	return thought.prepared_request
+	var request: AIProviderRequest = thought.prepared_request
+	if request != null and not model.strip_edges().is_empty():
+		request.model = model.strip_edges()
+	return request
 
 
 ## Bir ajan rolü için CANLI düşünme başlatır (asenkron).
 ## Sonuç 'thought_completed' sinyali ile gelir — bu fonksiyon beklemez.
 ## Dönen: başlatılabildi mi (false = ön koşul hatası, sinyal yine yayılır).
 func think_live(
-	role: int, task: String, context: Dictionary = {}
+	role: int, task: String, context: Dictionary = {},
+	model: String = ""
 ) -> bool:
 	if _busy:
 		_emit_fail(role, "Köprü meşgul — başka bir düşünme sürüyor")
@@ -85,7 +92,9 @@ func think_live(
 		_emit_fail(role, "Router bağlı değil — canlı çağrı yapılamaz")
 		return false
 
-	var request: AIProviderRequest = build_request_for(role, task, context)
+	var request: AIProviderRequest = build_request_for(
+		role, task, context, model
+	)
 	if request == null:
 		_emit_fail(role, "İstek kurulamadı (rol promptsuz olabilir)")
 		return false
