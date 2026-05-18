@@ -112,6 +112,7 @@ func parse_plan(content: String, instruction: String) -> Array:
 	if typeof(parsed) != TYPE_ARRAY:
 		return [_fallback(instruction)]
 	var tasks: Array = []
+	var reserved: Dictionary = {}
 	for item in parsed:
 		var title: String = ""
 		var raw_file: String = ""
@@ -122,9 +123,11 @@ func parse_plan(content: String, instruction: String) -> Array:
 			title = str(item).strip_edges()
 		if title.is_empty():
 			continue
+		var target: String = sanitize_target(raw_file, title, reserved)
+		reserved[target] = true
 		tasks.append({
 			"title": title,
-			"target_file": sanitize_target(raw_file, title),
+			"target_file": target,
 		})
 		if tasks.size() >= MAX_TASKS:
 			break
@@ -136,8 +139,13 @@ func parse_plan(content: String, instruction: String) -> Array:
 ## Model-üretimi dosya adını güvenli res://game/ yoluna zorlar.
 ## Yalnız [a-z0-9_] basename; uzantıya göre alt klasör (.gd→scripts,
 ## .tscn→scenes, diğer→resources); path traversal / kök dışı imkânsız.
-## Var olan dosya ASLA ezilmez — çakışırsa _2, _3… eklenir.
-func sanitize_target(raw: String, title: String) -> String:
+## Var olan dosya ASLA ezilmez — çakışırsa _2, _3… eklenir. reserved:
+## aynı plan içinde zaten atanmış yollar (model iki göreve aynı adı
+## verirse plan-içi çakışma da ezilmesin — üretilen oyunda dosya
+## kaybı olmasın). Varsayılan boş = bağımsız çağrı (geriye uyumlu).
+func sanitize_target(
+	raw: String, title: String, reserved: Dictionary = {}
+) -> String:
 	var base: String = raw
 	var sep: int = base.rfind("/")
 	if sep != -1:
@@ -150,7 +158,7 @@ func sanitize_target(raw: String, title: String) -> String:
 		slug = _slug(title)
 	if slug.is_empty():
 		slug = "uretim"
-	return _unique_path(_dir_for_ext(ext), slug, ext)
+	return _unique_path(_dir_for_ext(ext), slug, ext, reserved)
 
 
 ## Tek görevlik güvenli fallback (plan bölünemediğinde).
@@ -186,14 +194,19 @@ func _dir_for_ext(ext: String) -> String:
 
 ## Var olan dosyayı EZMEYEN benzersiz yol üretir (AAA: üretilen kod
 ## elle yazılan kodu bozmaz). dir + slug(.ext); çakışırsa slug_2…
-func _unique_path(dir: String, slug: String, ext: String) -> String:
+## reserved: disk dışında bu plan içinde zaten atanmış yollar da
+## çakışma sayılır (plan-içi dosya kaybı önlenir).
+func _unique_path(
+	dir: String, slug: String, ext: String, reserved: Dictionary = {}
+) -> String:
 	var candidate: String = dir + slug + "." + ext
-	if not FileAccess.file_exists(candidate):
+	if not FileAccess.file_exists(candidate) and not reserved.has(candidate):
 		return candidate
 	var n: int = 2
 	while n <= MAX_UNIQUE_TRIES:
 		candidate = "%s%s_%d.%s" % [dir, slug, n, ext]
-		if not FileAccess.file_exists(candidate):
+		if (not FileAccess.file_exists(candidate)
+				and not reserved.has(candidate)):
 			return candidate
 		n += 1
 	# Üst sınır (pratikte ulaşılmaz) — yine de güvenli kök içinde kal.

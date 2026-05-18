@@ -26,6 +26,7 @@ static func run_all() -> Array:
 	results.append(_b("Decompose: Güvenlik", _test_sanitize_default()))
 	results.append(_b("Decompose: Yerleşim", _test_subfolder_by_ext()))
 	results.append(_b("Decompose: Yerleşim", _test_no_overwrite_unique()))
+	results.append(_b("Decompose: Yerleşim", _test_in_plan_collision()))
 	results.append(_b("Decompose: Köprü", _test_no_bridge_fallback()))
 	return results
 
@@ -200,6 +201,29 @@ static func _test_no_overwrite_unique() -> Dictionary:
 		return _fail(name, "çakışma _2 ile çözülmedi: " + first)
 	if second != dir + "yeni.gd":
 		return _fail(name, "çakışmasız ad değişmemeli: " + second)
+	return _ok(name)
+
+
+static func _test_in_plan_collision() -> Dictionary:
+	var name := "Aynı plan içinde çakışan ad ezilmez (_2 ile ayrışır)"
+	var d := _new()
+	var raw := (
+		"[{\"title\":\"Skor\",\"target_file\":\"sistem.gd\"},"
+		+ "{\"title\":\"Can\",\"target_file\":\"sistem.gd\"}]"
+	)
+	var tasks: Array = d.parse_plan(raw, "oyun")
+	d.free()
+	if tasks.size() != 2:
+		return _fail(name, "2 görev beklendi: %d" % tasks.size())
+	var p0: String = str(tasks[0]["target_file"])
+	var p1: String = str(tasks[1]["target_file"])
+	if p0 == p1:
+		return _fail(name, "iki görev aynı yola yazardı (dosya kaybı): "
+			+ p0)
+	if p0 != "res://game/scripts/sistem.gd":
+		return _fail(name, "ilki temel ad olmalı: " + p0)
+	if p1 != "res://game/scripts/sistem_2.gd":
+		return _fail(name, "ikincisi _2 olmalı: " + p1)
 	return _ok(name)
 
 
