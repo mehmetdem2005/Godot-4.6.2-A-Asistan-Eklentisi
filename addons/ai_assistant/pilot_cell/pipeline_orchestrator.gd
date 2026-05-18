@@ -93,6 +93,27 @@ func extract_code(content: String) -> String:
 	return rest.substr(0, close).strip_edges()
 
 
+## Sahne (.tscn) metnini hafif doğrular — saf, ağsız, test edilebilir.
+## Godot .tscn metin formatı: `[gd_scene ...]` başlığı + en az bir
+## `[node ...]`. Sahte PASS yok — işaret yoksa dürüst FAIL.
+## Dönen: {ok: bool, reason: String}
+func verify_scene_text(text: String) -> Dictionary:
+	var t: String = text.strip_edges()
+	if t.is_empty():
+		return {"ok": false, "reason": "Sahne içeriği boş"}
+	if not t.begins_with("[gd_scene"):
+		return {
+			"ok": false,
+			"reason": "Geçerli .tscn değil ([gd_scene başlığı yok)",
+		}
+	if not t.contains("[node "):
+		return {
+			"ok": false,
+			"reason": "Sahnede düğüm yok ([node bölümü bulunamadı)",
+		}
+	return {"ok": true, "reason": ""}
+
+
 ## Bir görev için plan ağacı kurar (Planner entegrasyonu).
 ## Dönen: çalıştırılacak ACTION düğümü (planner.tree içinde).
 func build_plan(goal_title: String, action_title: String) -> AIPlanNode:
@@ -121,21 +142,34 @@ func apply_generated_code(
 	if not bool(pg["allowed"]):
 		return _stage("path_guard", false, str(pg["reason"]))
 
-	# --- Verifier ---
+	# --- Verifier --- (.tscn = sahne metni; GDScript derleyicisinden
+	# geçirmek ANLAMSIZ → sahneye özel hafif yapısal doğrulama)
 	pipeline_progress.emit("Doğrulanıyor...")
-	var vr: Dictionary = _verifier.verify(code)
-	if not bool(vr["passed"]):
-		var detail: String = _verify_detail(vr)
-		var d0: Dictionary = _stage(
-			"verify", false,
-			"Doğrulama başarısız (%s): %s" % [
-				str(vr["failed_level"]), detail
-			]
-		)
-		d0["verify_level"] = str(vr["failed_level"])
-		d0["verify_detail"] = detail
-		d0["failed_code"] = code
-		return d0
+	if target_path.ends_with(".tscn"):
+		var sv: Dictionary = verify_scene_text(code)
+		if not bool(sv["ok"]):
+			var ds: Dictionary = _stage(
+				"verify", false,
+				"Sahne doğrulaması başarısız: " + str(sv["reason"])
+			)
+			ds["verify_level"] = "scene"
+			ds["verify_detail"] = str(sv["reason"])
+			ds["failed_code"] = code
+			return ds
+	else:
+		var vr: Dictionary = _verifier.verify(code)
+		if not bool(vr["passed"]):
+			var detail: String = _verify_detail(vr)
+			var d0: Dictionary = _stage(
+				"verify", false,
+				"Doğrulama başarısız (%s): %s" % [
+					str(vr["failed_level"]), detail
+				]
+			)
+			d0["verify_level"] = str(vr["failed_level"])
+			d0["verify_detail"] = detail
+			d0["failed_code"] = code
+			return d0
 
 	# --- ActionSpec ---
 	var spec := AIActionSpec.create(
@@ -366,12 +400,23 @@ func _build_task_instruction(t: Dictionary) -> String:
 			+ "derlenebilir düzeltilmiş dosyayı tek parça ver."
 		)
 	else:
-		instruction = (
-			"ALT GÖREV: " + str(t["title"]) + "\n"
-			+ "GENEL HEDEF: " + _bp_goal + "\n"
-			+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
-			+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
-		)
+		var target: String = str(t["target_file"])
+		if target.ends_with(".tscn"):
+			instruction = (
+				"ALT GÖREV: " + str(t["title"]) + "\n"
+				+ "GENEL HEDEF: " + _bp_goal + "\n"
+				+ "HEDEF DOSYA: " + target + "\n\n"
+				+ AIRolePrompts.TSCN_CONTRACT
+			)
+		else:
+			instruction = (
+				"ALT GÖREV: " + str(t["title"]) + "\n"
+				+ "GENEL HEDEF: " + _bp_goal + "\n"
+				+ "HEDEF DOSYA: " + target + "\n"
+				+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
+				+ "GDScript üret; markdown kod bloğunda ver, açıklama "
+				+ "yazma."
+			)
 	if not _bp_classes.is_empty():
 		instruction += (
 			"\n\nZATEN ÜRETİLEN SINIFLAR (atıf gerekiyorsa BU gerçek "

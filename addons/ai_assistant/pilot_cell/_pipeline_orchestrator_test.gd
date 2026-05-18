@@ -35,7 +35,58 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Dinamik", _test_repair_spawn_and_bound()))
 	results.append(_b("E2E: Dinamik", _test_spawn_from_architect()))
 	results.append(_b("E2E: Dinamik", _test_status_color_consistency()))
+	results.append(_b("E2E: Sahne", _test_verify_scene_text()))
+	results.append(_b("E2E: Sahne", _test_scene_target_skips_gd_verify()))
 	return results
+
+
+static func _test_verify_scene_text() -> Dictionary:
+	var name := "verify_scene_text geçerli .tscn'i kabul, bozuğu reddeder"
+	var o := _new()
+	var good := (
+		"[gd_scene load_steps=2 format=3]\n\n"
+		+ "[ext_resource type=\"Script\" "
+		+ "path=\"res://game/scripts/player.gd\" id=\"1\"]\n\n"
+		+ "[node name=\"Root\" type=\"Node2D\"]\n"
+		+ "script = ExtResource(\"1\")\n"
+	)
+	var ok_res: Dictionary = o.verify_scene_text(good)
+	var empty_res: Dictionary = o.verify_scene_text("   ")
+	var no_hdr: Dictionary = o.verify_scene_text("[node name=\"X\"]")
+	var no_node: Dictionary = o.verify_scene_text(
+		"[gd_scene format=3]\n"
+	)
+	o.free()
+	if not bool(ok_res["ok"]):
+		return _fail(name, "geçerli sahne reddedildi: "
+			+ str(ok_res["reason"]))
+	if bool(empty_res["ok"]):
+		return _fail(name, "boş sahne kabul edildi")
+	if bool(no_hdr["ok"]):
+		return _fail(name, "[gd_scene başlığı yokken kabul edildi")
+	if bool(no_node["ok"]):
+		return _fail(name, "düğümsüz sahne kabul edildi")
+	return _ok(name)
+
+
+static func _test_scene_target_skips_gd_verify() -> Dictionary:
+	var name := ".tscn hedefi GDScript derleyicisine takılmaz, yazılır"
+	var o := _new()
+	var tpath := "res://game/scenes/__e2e_scene__.tscn"
+	var scene := (
+		"[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node2D\"]\n"
+	)
+	var r: Dictionary = o.apply_generated_code(tpath, scene, "CodeEngineer")
+	o.free()
+	var wrote: bool = FileAccess.file_exists(tpath)
+	if wrote:
+		DirAccess.remove_absolute(tpath)
+	if str(r["stage"]) != "executed" or not bool(r["ok"]):
+		return _fail(name, "sahne yazılmalıydı: %s / %s" % [
+			str(r["stage"]), str(r["message"])])
+	if not wrote:
+		return _fail(name, ".tscn res://game/scenes/ altına yazılmalıydı")
+	return _ok(name)
 
 
 ## Planner milestone'u hazır, dinamik kuyruğu test edilebilir orkestratör.

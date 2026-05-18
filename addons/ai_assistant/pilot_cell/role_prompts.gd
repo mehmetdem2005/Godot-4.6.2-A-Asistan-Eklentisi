@@ -57,6 +57,25 @@ const GODOT4_API_GUARD: String = (
 	+ "Godot 4.6 GDScript ver (SEARCH/REPLACE değil)."
 )
 
+## ÇALIŞAN SAHNE SÖZLEŞMESİ — hedef .tscn ise üretilen metin Godot
+## 4.6'nın gerçekten yükleyebileceği geçerli bir sahne olmalı (oyun
+## çalışsın). UID YOK (kararsız) → script'e `path=` ile atıfta bulun.
+const TSCN_CONTRACT: String = (
+	"BU GÖREV BİR SAHNE (.tscn) ÜRETİR. Çıktı, Godot 4.6'nın "
+	+ "yükleyebileceği GEÇERLİ metin sahne olmalı; markdown/açıklama "
+	+ "YAZMA, sadece sahne metni. KESİN BİÇİM:\n"
+	+ "- İlk satır: `[gd_scene load_steps=N format=3]` "
+	+ "(load_steps = ext_resource sayısı + 1)\n"
+	+ "- Script bağlamak için: `[ext_resource type=\"Script\" "
+	+ "path=\"res://game/scripts/AD.gd\" id=\"1\"]` (UID KULLANMA, "
+	+ "yalnız path; AD üretilen gerçek dosya adı)\n"
+	+ "- En az bir kök düğüm: `[node name=\"Root\" type=\"Node2D\"]` "
+	+ "ve gerekiyorsa `script = ExtResource(\"1\")`\n"
+	+ "- Alt düğümler: `[node name=\"X\" type=\"...\" parent=\".\"]`\n"
+	+ "- Yol her zaman res://game/scripts/ altındaki GERÇEK dosyalar "
+	+ "(uydurma yol yok)."
+)
+
 ## Her rol için sistem promptu — rolün kimliği ve uzmanlığı.
 const SYSTEM_PROMPTS: Dictionary = {
 	AICellRoles.Role.PRODUCT_MANAGER:

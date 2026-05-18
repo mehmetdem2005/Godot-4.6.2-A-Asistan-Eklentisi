@@ -85,9 +85,11 @@ func _planning_prompt(instruction: String) -> String:
 		"Aşağıdaki Godot 4.6 oyun geliştirme isteğini "
 		+ str(MIN_TASKS) + "-" + str(MAX_TASKS) + " bağımsız alt göreve "
 		+ "böl. Her alt görev TEK bir dosya üretmeli (GDScript .gd). "
-		+ "target_file SADECE dosya adı olsun (yol/klasör YAZMA — "
-		+ "yerleşimi sistem yapar). SADECE şu biçimde bir JSON dizi "
-		+ "döndür, başka HİÇBİR açıklama yazma:\n"
+		+ "Oyun ÇALIŞABİLİR olmalı: alt görevlerden BİRİ ana sahne "
+		+ "olsun (target_file uzantısı .tscn) ve üretilen scriptleri "
+		+ "birbirine bağlasın. target_file SADECE dosya adı olsun "
+		+ "(yol/klasör YAZMA — yerleşimi sistem yapar). SADECE şu "
+		+ "biçimde bir JSON dizi döndür, başka HİÇBİR açıklama yazma:\n"
 		+ "[{\"title\":\"kısa görev adı\",\"target_file\":\"ad.gd\"}]\n"
 		+ "İSTEK: " + instruction
 	)
