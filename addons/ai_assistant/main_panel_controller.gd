@@ -184,6 +184,52 @@ func project_context() -> String:
 	return AIProjectScanner.new().project_summary()
 
 
+## İnteraktif dosya okuma niyeti: "X.gd oku/aç/göster" gibi mesajlarda
+## istenen dosyanın GERÇEK içeriğini (salt-okunur, path_guard korumalı)
+## sohbet/üretim bağlamına gömülecek metin olarak döndürür. İstek
+## yoksa / dosya güvensizse boş string (dürüst — uydurma yok).
+## Saf: yalnız diskten okur, ağ yok — test edilebilir.
+const READ_VERBS: Array = [
+	"oku", "aç", "ac", "göster", "goster", "read", "open", "show",
+	"incele", "bak",
+]
+
+
+func requested_file_context(text: String) -> String:
+	var low: String = text.to_lower()
+	var has_verb: bool = false
+	for v in READ_VERBS:
+		if low.contains(str(v)):
+			has_verb = true
+			break
+	if not has_verb:
+		return ""
+	var path: String = _extract_path(text)
+	if path.is_empty():
+		return ""
+	var r: Dictionary = AIProjectScanner.new().read_file(path)
+	if not bool(r.get("ok", false)):
+		return ""
+	return (
+		"\n\nİSTENEN DOSYA (%s, salt-okunur gerçek içerik):\n%s"
+		% [path, str(r["content"])]
+	)
+
+
+## Mesajdan res:// / user:// ile başlayan ilk yol belirtecini çıkarır
+## (sondaki noktalama temizlenir). Yoksa boş.
+func _extract_path(text: String) -> String:
+	for raw in text.split(" ", false):
+		var tok: String = str(raw).strip_edges()
+		if tok.begins_with("res://") or tok.begins_with("user://"):
+			while tok.length() > 0 and tok.right(1) in [
+				".", ",", "?", "!", ")", "(", "'", "\"", ":", ";"
+			]:
+				tok = tok.left(tok.length() - 1)
+			return tok
+	return ""
+
+
 ## Sohbet olay yayıncısı — workspace Canlı Akış sekmesi buna bağlanır.
 func feed() -> AIFeedEmitter:
 	return _feed

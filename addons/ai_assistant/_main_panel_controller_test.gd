@@ -32,6 +32,9 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Hafıza", _test_history_turn_window()))
 	results.append(_b("Panel: Hafıza", _test_history_char_budget()))
 	results.append(_b("Panel: Hafıza", _test_history_empty()))
+	results.append(_b("Panel: Oku", _test_read_intent_returns_content()))
+	results.append(_b("Panel: Oku", _test_read_no_verb_empty()))
+	results.append(_b("Panel: Oku", _test_read_traversal_blocked()))
 	results.append(_b("Panel: Sıfırla", _test_reset_clears_working_queue()))
 	results.append(_b("Panel: Sıfırla", _test_reset_preserves_episodic()))
 	return results
@@ -342,6 +345,42 @@ static func _test_history_empty() -> Dictionary:
 # SİSTEM SIFIRLAMA (Plan B — working+kuyruk temizlenir,
 # episodic/procedural korunur — Aşama 4b köprüsü)
 # ============================================================
+
+static func _test_read_intent_returns_content() -> Dictionary:
+	var name := "'res://project.godot oku' → gerçek içerik bağlama girer"
+	var c := _c()
+	var ctx: String = c.requested_file_context(
+		"şu dosyayı oku: res://project.godot lütfen"
+	)
+	if ctx.is_empty():
+		return _fail(name, "istenen dosya içeriği dönmeli")
+	if not ctx.contains("res://project.godot"):
+		return _fail(name, "hangi dosya olduğu belirtilmeli")
+	if not ctx.contains("config_version"):
+		return _fail(name, "gerçek project.godot içeriği gelmeli")
+	return _ok(name)
+
+
+static func _test_read_no_verb_empty() -> Dictionary:
+	var name := "Okuma fiili yoksa boş (uydurma yok)"
+	var c := _c()
+	if not c.requested_file_context("res://project.godot nedir").is_empty():
+		return _fail(name, "fiilsiz istek boş dönmeli")
+	if not c.requested_file_context("bir oyun yap").is_empty():
+		return _fail(name, "yol yokken boş dönmeli")
+	return _ok(name)
+
+
+static func _test_read_traversal_blocked() -> Dictionary:
+	var name := "Traversal/güvensiz yol okuma reddedilir (path_guard)"
+	var c := _c()
+	var ctx: String = c.requested_file_context(
+		"oku res://../../etc/passwd"
+	)
+	if not ctx.is_empty():
+		return _fail(name, "traversal içerik dönmemeli")
+	return _ok(name)
+
 
 static func _test_reset_clears_working_queue() -> Dictionary:
 	var name := "Sıfırla working belleği ve kuyruğu temizler"

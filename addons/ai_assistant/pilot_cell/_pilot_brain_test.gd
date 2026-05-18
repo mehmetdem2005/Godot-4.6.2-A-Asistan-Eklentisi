@@ -25,6 +25,7 @@ static func run_all() -> Array:
 	results.append(_b("Brain: Prompts", _test_prompts_purpose()))
 	results.append(_b("Brain: Prompts", _test_prompts_task_message()))
 	results.append(_b("Brain: Prompts", _test_prompts_context()))
+	results.append(_b("Brain: Prompts", _test_prompts_no_truncate()))
 
 	# AgentBrain
 	results.append(_b("Brain: Think", _test_brain_offline()))
@@ -158,6 +159,24 @@ static func _test_prompts_context() -> Dictionary:
 		return _fail(name, "bağlamlı mesajda bağlam bölümü olmalı")
 	if not with_ctx.contains("hedef: hızlı menü"):
 		return _fail(name, "bağlam içeriği mesajda görünmeli")
+	return _ok(name)
+
+
+static func _test_prompts_no_truncate() -> Dictionary:
+	var name := "Zincir artefaktları kırpılmaz, kısa anahtarlar kırpılır"
+	var big := "A".repeat(2000)
+	var msg: String = AIRolePrompts.build_task_message(
+		AICellRoles.Role.CODE_ENGINEER, "kodla",
+		{"uretilen_kod": big, "yan_not": "B".repeat(2000)}
+	)
+	# uretilen_kod NO_TRUNCATE → tam 2000 'A' geçmeli
+	if not msg.contains("A".repeat(2000)):
+		return _fail(name, "uretilen_kod kırpıldı (zincir kaybı)")
+	# yan_not kırpılmalı → 2000 'B' geçMEmeli ama '...' olmalı
+	if msg.contains("B".repeat(2000)):
+		return _fail(name, "kısa anahtar kırpılmadı")
+	if not msg.contains("..."):
+		return _fail(name, "kırpma işareti yok")
 	return _ok(name)
 
 

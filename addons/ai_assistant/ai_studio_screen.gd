@@ -384,6 +384,8 @@ func _on_send() -> void:
 	_send_btn.disabled = true
 	var intent: int = _ctrl.classify_intent(task)
 	var proj: String = _ctrl.project_context()
+	# İnteraktif okuma: "res://...gd oku/aç" → gerçek içerik bağlama.
+	proj += _ctrl.requested_file_context(task)
 	if intent == AIMainPanelController.Intent.CHAT:
 		_ctrl.add_message("system", "… Asistan yanıtlıyor…")
 		_redraw_chat()

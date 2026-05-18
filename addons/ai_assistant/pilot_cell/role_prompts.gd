@@ -23,6 +23,17 @@ extends RefCounted
 ##
 ## Mock policy: prompt yok ise boş döner — uydurma prompt yok.
 
+## KIRPILMAYAN BAĞLAM ANAHTARLARI — zincirde rolden role geçen büyük
+## artefaktlar (mimari tasarım, üretilen kod, inceleme). 400 char'a
+## kırpılırlarsa CodeEngineer mimariyi/önceki kodu KAYBEDER → tutarsız
+## çıktı. Token tavanı (100000) zaten koruyor; bunlar tam geçer.
+const NO_TRUNCATE_KEYS: Array = [
+	"mimari_tasarim", "uretilen_kod", "inceleme_bulgulari",
+]
+
+## Kırpılabilir bağlam değeri üst sınırı (kısa anahtarlar için güvenli).
+const CONTEXT_TRUNCATE_CHARS: int = 400
+
 ## Ortak kısıt metni — her role eklenir.
 const COMMON_CONSTRAINTS: String = (
 	"Hedef: Godot 4.6, Forward Mobile renderer, Android telefon, "
@@ -173,9 +184,11 @@ static func build_task_message(
 		lines.append("ÖNCEKİ AŞAMALARDAN BAĞLAM:")
 		for key in context:
 			var value: String = str(context[key])
-			# Bağlamı makul uzunlukta tut
-			if value.length() > 400:
-				value = value.left(400) + "..."
+			# Zincir artefaktları (mimari/kod/inceleme) TAM geçer;
+			# kısa yardımcı anahtarlar makul uzunlukta tutulur.
+			if (not NO_TRUNCATE_KEYS.has(key)
+					and value.length() > CONTEXT_TRUNCATE_CHARS):
+				value = value.left(CONTEXT_TRUNCATE_CHARS) + "..."
 			lines.append("- %s: %s" % [key, value])
 
 	# Role özel çıktı yönergesi
