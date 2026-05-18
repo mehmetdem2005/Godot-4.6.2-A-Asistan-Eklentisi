@@ -37,6 +37,12 @@ const BASE_CHAIN: Array = [
 ## inceleme kullanıcının seçtiği modelde kalır.
 const CODE_MODEL: String = "deepseek-chat"
 
+## BÖLÜNMÜŞ ÜRETİM: tek çağrı sağlayıcı tavanında (8192) kesilirse
+## kaldığı yerden devam parçaları istenir, birleştirilir. Sınırlı —
+## sonsuz döngü yok.
+const MAX_CODE_CHUNKS: int = 6
+const CONT_TAIL_CHARS: int = 2000
+
 var _bridge: AIAgentLiveBridge = null
 var _task: String = ""
 var _model: String = ""
@@ -47,6 +53,8 @@ var _code: String = ""
 var _transcript: Array = []
 var _corrected: bool = false
 var _running: bool = false
+var _code_accum: String = ""
+var _chunk: int = 0
 
 
 ## Köprüyü bağlar (paylaşılan anahtarlı router'lı).
@@ -70,6 +78,8 @@ func run(task: String, model: String = "") -> bool:
 	_code = ""
 	_transcript = []
 	_corrected = false
+	_code_accum = ""
+	_chunk = 0
 	_steps = BASE_CHAIN.duplicate()
 	if not _bridge.thought_completed.is_connected(_on_thought):
 		_bridge.thought_completed.connect(_on_thought)
@@ -104,8 +114,29 @@ func _on_thought(thought: Dictionary) -> void:
 		AICellRoles.Role.ARCHITECT:
 			_context["mimari_tasarim"] = content
 		AICellRoles.Role.CODE_ENGINEER:
-			_code = content
-			_context["uretilen_kod"] = content
+			_code_accum += content
+			# Sağlayıcı tavanında kesildiyse: kaldığı yerden devam iste.
+			if (str(thought.get("finish_reason", "")) == "length"
+					and _chunk < MAX_CODE_CHUNKS):
+				_chunk += 1
+				chain_progress.emit(
+					"Kod uzun — bölünmüş üretim (parça %d)" % (_chunk + 1)
+				)
+				var cont: String = (
+					_task + "\n\n[BÖLÜNMÜŞ ÜRETİM] Önceki çıktı uzunluk "
+					+ "sınırında kesildi. Aşağıdaki kısmı AYNEN TEKRARLAMA; "
+					+ "tam kaldığın yerden devam et, SADECE eksik kalan "
+					+ "GDScript'i ekle, markdown/açıklama yazma:\n"
+					+ _tail(_code_accum)
+				)
+				_bridge.think_live(
+					AICellRoles.Role.CODE_ENGINEER, cont, {}, CODE_MODEL
+				)
+				return
+			_code = _join_clean(_code_accum)
+			_context["uretilen_kod"] = _code
+			_code_accum = ""
+			_chunk = 0
 		AICellRoles.Role.REVIEWER:
 			_context["inceleme_bulgulari"] = content
 			if _is_fail(content) and not _corrected:
@@ -117,6 +148,25 @@ func _on_thought(thought: Dictionary) -> void:
 		_finish(true, "Zincir tamam (%d rol)" % _transcript.size())
 		return
 	_dispatch_step()
+
+
+## Birleştirilen kodun son CONT_TAIL_CHARS karakteri (devam bağlamı).
+func _tail(text: String) -> String:
+	if text.length() <= CONT_TAIL_CHARS:
+		return text
+	return text.substr(text.length() - CONT_TAIL_CHARS)
+
+
+## Parçaları birleştirir, markdown çit satırlarını (```), söker.
+## GDScript'te ``` sözdizimi yoktur → güvenli; extract_code sonra
+## çitsiz metni aynen geçirir (tutarlı, kesintisiz kod).
+func _join_clean(raw: String) -> String:
+	var out: PackedStringArray = PackedStringArray()
+	for line in raw.split("\n"):
+		if str(line).strip_edges().begins_with("```"):
+			continue
+		out.append(line)
+	return "\n".join(out).strip_edges()
 
 
 ## Reviewer çıktısı FAIL mi (PASS varsa geçer kabul — heuristik).

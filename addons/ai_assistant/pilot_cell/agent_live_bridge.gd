@@ -255,7 +255,7 @@ func finalize_raw(
 		return _result_dict(false, role, "", reason, latency)
 
 	return _result_dict(true, role, response.content, "LLM cevabı alındı",
-		latency)
+		latency, response.finish_reason)
 
 
 ## Köprü durumu — test ve UI için.
@@ -272,7 +272,8 @@ func bridge_status() -> Dictionary:
 # ============================================================
 
 func _result_dict(
-	ok: bool, role: int, content: String, note: String, latency: int
+	ok: bool, role: int, content: String, note: String, latency: int,
+	finish_reason: String = ""
 ) -> Dictionary:
 	return {
 		"ok": ok,
@@ -282,6 +283,8 @@ func _result_dict(
 		"llm_called": true,
 		"latency_ms": latency,
 		"status_note": note,
+		# "length" = sağlayıcı tavanında kesildi → bölünmüş üretim için.
+		"finish_reason": finish_reason,
 	}
 
 

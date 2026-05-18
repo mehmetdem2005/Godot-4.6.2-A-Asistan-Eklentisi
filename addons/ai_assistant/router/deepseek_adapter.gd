@@ -10,6 +10,11 @@ extends AIProviderAdapterBase
 ## Master plan'da başlangıç sağlayıcısı — bütçe dostu, "Single Mode".
 
 
+## DeepSeek API çıktı token sabit tavanı. Üzerinde değer gönderilirse
+## API isteği 400 ile reddeder — bu yüzden GÜVENLE kırpılır.
+const MAX_OUTPUT_TOKENS: int = 8192
+
+
 func _init() -> void:
 	provider_id = AIProviderRequest.Provider.DEEPSEEK
 	provider_name = "deepseek"
@@ -26,7 +31,7 @@ func build_request_body(request: AIProviderRequest) -> Dictionary:
 		"model": model,
 		"messages": _messages_openai_format(request),
 		"temperature": request.temperature,
-		"max_tokens": request.max_tokens,
+		"max_tokens": mini(request.max_tokens, MAX_OUTPUT_TOKENS),
 		"stream": false,
 	}
 

@@ -27,7 +27,36 @@ static func run_all() -> Array:
 	results.append(_b("LiveBridge: Mock", _test_finalize_mock_policy()))
 	results.append(_b("LiveBridge: Sohbet", _test_chat_no_router_fails()))
 	results.append(_b("LiveBridge: Sohbet", _test_chat_extra_params_safe()))
+	results.append(_b("LiveBridge: Bölünme", _test_finish_reason_propagated()))
 	return results
+
+
+static func _test_finish_reason_propagated() -> Dictionary:
+	var name := "finish_reason='length' sonuca taşınır (bölünmüş üretim)"
+	var bridge := AIAgentLiveBridge.new()
+	bridge.attach_router(AIProviderRouter.new())
+	var req: AIProviderRequest = bridge.build_request_for(
+		AICellRoles.Role.CODE_ENGINEER, "uzun kod"
+	)
+	var raw: Dictionary = {
+		"ok": true,
+		"status": 200,
+		"json": {"choices": [{
+			"message": {"content": "func a():\n\tpass"},
+			"finish_reason": "length",
+		}]},
+		"latency_ms": 10,
+	}
+	var mapped: Dictionary = bridge.finalize_raw(
+		raw, req, AICellRoles.Role.CODE_ENGINEER
+	)
+	bridge.free()
+	if not bool(mapped["ok"]):
+		return _fail(name, "ok olmalı: " + str(mapped["status_note"]))
+	if str(mapped.get("finish_reason", "")) != "length":
+		return _fail(name, "finish_reason taşınmadı: "
+			+ str(mapped.get("finish_reason", "")))
+	return _ok(name)
 
 
 static func _test_chat_extra_params_safe() -> Dictionary:
