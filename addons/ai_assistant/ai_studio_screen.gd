@@ -41,7 +41,6 @@ var _status_label: Label = null
 var _settings_view: Control = null
 var _key_edit: LineEdit = null
 var _model_option: OptionButton = null
-var _live_check: CheckBox = null
 
 # Workspace görünümü
 var _workspace_view: Control = null
@@ -176,10 +175,12 @@ func _build_settings_view() -> Control:
 	key_btn.pressed.connect(_on_save_key)
 	key_row.add_child(key_btn)
 
-	_live_check = CheckBox.new()
-	_live_check.text = "Canlı Mod (gerçek LLM çağrısı — Gönder için ŞART)"
-	_live_check.toggled.connect(_on_live_toggled)
-	col.add_child(_live_check)
+	var key_hint := Label.new()
+	key_hint.text = (
+		"Anahtarı kaydedince hazır olur — Gönder doğrudan çalışır."
+	)
+	key_hint.add_theme_font_size_override("font_size", 12)
+	col.add_child(key_hint)
 
 	var model_lbl := Label.new()
 	model_lbl.text = "Yapay Zeka Modeli:"
@@ -349,20 +350,13 @@ func _redraw_chat() -> void:
 # AYARLAR EYLEMLERİ
 # ============================================================
 
-func _on_live_toggled(pressed: bool) -> void:
-	_ctrl.set_live_mode(pressed)
-	_ctrl.add_message(
-		"system", "Canlı mod: " + ("AÇIK" if pressed else "kapalı")
-	)
-	_redraw_chat()
-	_refresh_status()
-
-
 func _on_save_key() -> void:
 	var res: Dictionary = _ctrl.save_api_key(_key_edit.text)
 	if bool(res["ok"]):
 		_key_edit.text = ""
-		_ctrl.add_message("system", "✓ API anahtarı kaydedildi")
+		_ctrl.add_message(
+			"system", "✓ API anahtarı kaydedildi — hazırsın, Gönder çalışır"
+		)
 	else:
 		_ctrl.add_message("system", "⚠ " + str(res["reason"]))
 	_redraw_chat()
@@ -374,18 +368,15 @@ func _refresh_status() -> void:
 	if _status_label == null:
 		return
 	var s: Dictionary = _ctrl.summary()
-	var live: bool = bool(s["live_mode"])
 	var has_key: bool = bool(s["has_key"])
-	var ready: bool = live and has_key
-	var head: String = "● HAZIR" if ready else "○ Gönderilemez"
-	_status_label.text = "%s  |  Canlı: %s  |  Anahtar: %s  |  Model: %s" % [
+	var head: String = (
+		"● HAZIR" if has_key else "○ API anahtarı gerekli (≡ Menü → Ayarlar)"
+	)
+	_status_label.text = "%s  |  Anahtar: %s  |  Model: %s" % [
 		head,
-		("açık" if live else "KAPALI"),
 		("var" if has_key else "YOK"),
 		str(s["model"]),
 	]
-	if _live_check != null:
-		_live_check.button_pressed = live
 
 
 func _on_model_selected(index: int) -> void:

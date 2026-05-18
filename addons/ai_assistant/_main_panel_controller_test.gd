@@ -16,6 +16,7 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Anahtar", _test_key_roundtrip()))
 	results.append(_b("Panel: Görev", _test_empty_task_blocked()))
 	results.append(_b("Panel: Görev", _test_live_off_blocked()))
+	results.append(_b("Panel: Görev", _test_key_autoenables_live()))
 	results.append(_b("Panel: Görev", _test_run_ready()))
 	results.append(_b("Panel: Görev", _test_target_path()))
 	results.append(_b("Panel: Sekme", _test_nine_tabs()))
@@ -92,21 +93,32 @@ static func _test_empty_task_blocked() -> Dictionary:
 
 
 static func _test_live_off_blocked() -> Dictionary:
-	var name := "Canlı mod kapalı → reddedilir"
+	var name := "Anahtarsız görev reddedilir (sahte başlatma yok)"
 	var c := _c()
-	# live_mode varsayılan kapalı
+	c.clear_api_key()  # diskte kalıcı anahtar olabilir — ön koşulu netle
 	var g: Dictionary = c.can_run_task("bir oyun yap")
 	if bool(g["ok"]):
-		return _fail(name, "canlı kapalıyken çalışmamalı")
-	if not str(g["reason"]).contains("Canlı"):
-		return _fail(name, "sebep canlı modu belirtmeli")
+		return _fail(name, "anahtarsız çalışmamalı")
+	if not str(g["reason"]).contains("anahtar"):
+		return _fail(name, "sebep API anahtarını belirtmeli")
+	return _ok(name)
+
+
+static func _test_key_autoenables_live() -> Dictionary:
+	var name := "Anahtar kaydı canlı modu otomatik açar"
+	var c := _c()
+	c.clear_api_key()  # diskte kalıcı anahtar olabilir — ön koşulu netle
+	if bool(c.summary()["live_mode"]):
+		return _fail(name, "anahtar yokken canlı kapalı olmalı")
+	c.save_api_key("sk-test-autolive")
+	if not bool(c.summary()["live_mode"]):
+		return _fail(name, "anahtar kaydı canlı modu açmalı")
 	return _ok(name)
 
 
 static func _test_run_ready() -> Dictionary:
-	var name := "Canlı + anahtar + görev → hazır"
+	var name := "Anahtar + görev → hazır (canlı otomatik)"
 	var c := _c()
-	c.set_live_mode(true)
 	c.save_api_key("sk-test-panel-ready")
 	var g: Dictionary = c.can_run_task("platform oyunu yap")
 	if not bool(g["ok"]):
