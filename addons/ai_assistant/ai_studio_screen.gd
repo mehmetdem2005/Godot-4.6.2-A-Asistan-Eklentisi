@@ -14,12 +14,23 @@ extends Control
 ## disiplini). Gerçek çalıştırma kanıtlanmış AIPipelineOrchestrator
 ## (Aşama 4c) ile yapılır. Görseli kullanıcı telefonda doğrular.
 
-enum View { CHAT, SETTINGS, WORKSPACE }
+enum View { CHAT, TASKS, SETTINGS, WORKSPACE }
 
 const VIEW_TITLES: Dictionary = {
 	View.CHAT: "Sohbet Ekranı",
+	View.TASKS: "Görevler",
 	View.SETTINGS: "Ayarlar",
 	View.WORKSPACE: "Çalışma Alanı (9 Sekme)",
+}
+
+## Görev durumu → renk (panel).
+const STATUS_COLORS: Dictionary = {
+	"bekliyor": "#888888",
+	"çalışıyor": "#DCDCAA",
+	"onarılıyor": "#D7BA7D",
+	"onay-bekliyor": "#C586C0",
+	"tamam": "#4EC9B0",
+	"başarısız": "#F44747",
 }
 
 var _ctrl: AIMainPanelController = null
@@ -41,6 +52,11 @@ var _status_label: Label = null
 var _settings_view: Control = null
 var _key_edit: LineEdit = null
 var _model_option: OptionButton = null
+
+# Görevler görünümü — canlı dinamik görev listesi
+var _tasks_view: Control = null
+var _tasks_log: RichTextLabel = null
+var _last_tasks: Array = []
 
 # Workspace görünümü
 var _workspace_view: Control = null
@@ -82,9 +98,11 @@ func _build_ui() -> void:
 	root.add_child(body)
 
 	_chat_view = _build_chat_view()
+	_tasks_view = _build_tasks_view()
 	_settings_view = _build_settings_view()
 	_workspace_view = _build_workspace_view()
 	body.add_child(_chat_view)
+	body.add_child(_tasks_view)
 	body.add_child(_settings_view)
 	body.add_child(_workspace_view)
 
@@ -98,6 +116,7 @@ func _build_header() -> Control:
 	menu_btn.flat = false
 	_menu_popup = menu_btn.get_popup()
 	_menu_popup.add_item("Sohbet", View.CHAT)
+	_menu_popup.add_item("Görevler", View.TASKS)
 	_menu_popup.add_item("Ayarlar", View.SETTINGS)
 	_menu_popup.add_item("Çalışma Alanı (9 Sekme)", View.WORKSPACE)
 	_menu_popup.id_pressed.connect(_on_menu_selected)
@@ -204,6 +223,69 @@ func _build_settings_view() -> Control:
 	return col
 
 
+func _build_tasks_view() -> Control:
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 8)
+
+	var hint := Label.new()
+	hint.text = (
+		"Çok-adımlı üretimde oluşan görevler ve canlı durumları. "
+		+ "Hata olursa otomatik onarım görevi eklenir."
+	)
+	hint.add_theme_font_size_override("font_size", 13)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(hint)
+
+	_tasks_log = RichTextLabel.new()
+	_tasks_log.bbcode_enabled = true
+	_tasks_log.scroll_following = true
+	_tasks_log.selection_enabled = true
+	_tasks_log.focus_mode = Control.FOCUS_NONE
+	_tasks_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(_tasks_log)
+	return col
+
+
+## Canlı görev listesini çizer (orkestratör tasks_updated → bu).
+func _render_tasks() -> void:
+	if _tasks_log == null:
+		return
+	_tasks_log.clear()
+	if _last_tasks.is_empty():
+		_tasks_log.append_text(
+			"[color=#888888]Henüz görev yok. Sohbette bir üretim "
+			+ "isteği gönder (ör. 'envanter sistemi olan oyun yap').[/color]"
+		)
+		return
+	for t in _last_tasks:
+		var st: String = str(t.get("status", "bekliyor"))
+		var color: String = str(STATUS_COLORS.get(st, "#CCCCCC"))
+		var kind: String = (
+			" (onarım)" if str(t.get("kind", "")) == "repair" else ""
+		)
+		_tasks_log.append_text(
+			"[color=%s]●[/color] [b]#%d[/b] %s%s — [color=%s]%s[/color]\n" % [
+				color, int(t.get("id", 0)), str(t.get("title", "")),
+				kind, color, st,
+			]
+		)
+		_tasks_log.append_text(
+			"   [color=#9CDCFE]%s[/color]\n" % str(t.get("target_file", ""))
+		)
+		var err: String = str(t.get("error", ""))
+		if not err.is_empty():
+			_tasks_log.append_text(
+				"   [color=#F44747]⚠ %s[/color]\n" % err
+			)
+
+
+func _on_tasks_updated(registry: Array) -> void:
+	_last_tasks = registry
+	_render_tasks()
+
+
 func _build_workspace_view() -> Control:
 	var holder := MarginContainer.new()
 	holder.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -228,12 +310,16 @@ func _apply_view(view: int) -> void:
 		_title_label.text = "AI Asistan — " + str(VIEW_TITLES.get(view, "?"))
 	if _chat_view != null:
 		_chat_view.visible = view == View.CHAT
+	if _tasks_view != null:
+		_tasks_view.visible = view == View.TASKS
 	if _settings_view != null:
 		_settings_view.visible = view == View.SETTINGS
 	if _workspace_view != null:
 		_workspace_view.visible = view == View.WORKSPACE
 	if view == View.WORKSPACE and _workspace_panel != null:
 		_workspace_panel.connect_feed(_ctrl.feed())
+	if view == View.TASKS:
+		_render_tasks()
 	if view == View.CHAT:
 		_refresh_status()
 
@@ -292,6 +378,7 @@ func _on_send() -> void:
 	_orch.attach_bridge(_bridge)
 	_orch.pipeline_progress.connect(_on_progress)
 	_orch.pipeline_completed.connect(_on_pipeline_done)
+	_orch.tasks_updated.connect(_on_tasks_updated)
 
 	_running = true
 	_send_btn.disabled = true

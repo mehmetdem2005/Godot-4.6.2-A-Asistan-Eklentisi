@@ -25,6 +25,14 @@ extends Node
 
 signal pipeline_completed(result: Dictionary)
 signal pipeline_progress(step: String)
+## Canlı görev listesi değiştiğinde — UI "Görevler" paneli buna bağlanır.
+signal tasks_updated(registry: Array)
+
+## Dinamik görev üretimi sınırları (kaçak/sonsuz döngü ve maliyet
+## koruması — profesyonel disiplin).
+const MAX_TOTAL_TASKS: int = 24
+const MAX_REPAIRS_PER_FILE: int = 2
+const MAX_ARCHITECT_SPAWN: int = 6
 
 var _bridge: AIAgentLiveBridge = null
 var _verifier: AIVerifierEngine = null
@@ -43,12 +51,18 @@ var _aux_bridge: AIAgentLiveBridge = null
 var _bp_active: bool = false
 var _bp_goal: String = ""
 var _bp_model: String = ""
-var _bp_tasks: Array = []
-var _bp_idx: int = 0
 var _bp_paths: Array = []
 var _bp_failed: Array = []
 var _bp_project: String = ""
 var _bp_classes: Array = []
+# Dinamik görev grafiği: kuyruk (bekleyen) + registry (hepsi, canlı
+# durum — panel kaynağı). _bp_current işlenen görev.
+var _bp_queue: Array = []
+var _bp_registry: Array = []
+var _bp_current: Dictionary = {}
+var _bp_seq: int = 0
+var _bp_spawned: int = 0
+var _bp_milestone_id: String = ""
 
 
 func _init() -> void:
@@ -105,10 +119,17 @@ func apply_generated_code(
 	pipeline_progress.emit("Doğrulanıyor...")
 	var vr: Dictionary = _verifier.verify(code)
 	if not bool(vr["passed"]):
-		return _stage(
+		var detail: String = _verify_detail(vr)
+		var d0: Dictionary = _stage(
 			"verify", false,
-			"Doğrulama başarısız: " + str(vr["failed_level"])
+			"Doğrulama başarısız (%s): %s" % [
+				str(vr["failed_level"]), detail
+			]
 		)
+		d0["verify_level"] = str(vr["failed_level"])
+		d0["verify_detail"] = detail
+		d0["failed_code"] = code
+		return d0
 
 	# --- ActionSpec ---
 	var spec := AIActionSpec.create(
@@ -219,11 +240,15 @@ func run_build_plan(
 	_bp_goal = instruction
 	_bp_model = model
 	_bp_project = project_context
-	_bp_tasks = []
-	_bp_idx = 0
 	_bp_paths = []
 	_bp_failed = []
 	_bp_classes = []
+	_bp_queue = []
+	_bp_registry = []
+	_bp_current = {}
+	_bp_seq = 0
+	_bp_spawned = 0
+	_bp_milestone_id = ""
 
 	# Yardımcı köprü: decomposer + zincir SIRAYLA kullanır (tek köprü,
 	# çakışmasız — decomposer biter, sonra zincir başlar).
@@ -253,43 +278,94 @@ func _on_chain_progress(step: String) -> void:
 func _on_decomposed(tasks: Array) -> void:
 	var goal: AIPlanNode = _planner.start_plan(_bp_goal)
 	var milestone: AIPlanNode = _planner.add_milestone("Üretim", goal.id)
+	_bp_milestone_id = milestone.id
 	for t in tasks:
 		var title: String = str(t.get("title", "")).strip_edges()
 		var target: String = str(t.get("target_file", "")).strip_edges()
 		if title.is_empty() or target.is_empty():
 			continue
-		var node: AIPlanNode = _planner.add_task(
-			title, milestone.id, "CodeEngineer"
-		)
-		_planner.add_action("Yaz: " + target, node.id)
-		_bp_tasks.append({
-			"title": title,
-			"target_file": target,
-			"node_id": node.id,
-		})
-	if _bp_tasks.is_empty():
+		_enqueue_task(title, target, "gen", 0, "", "")
+	if _bp_registry.is_empty():
 		_finalize_build_plan()
 		return
 	pipeline_progress.emit(
-		"%d alt görev bulundu" % _bp_tasks.size()
+		"%d alt görev bulundu" % _bp_registry.size()
 	)
+	_emit_tasks()
 	_run_next_task()
 
 
+## Bir görevi planner ağacına + kuyruğa + registry'ye ekler.
+## Dönen: eklendi mi (toplam üst sınır aşılırsa false — kaçak koruma).
+func _enqueue_task(
+	title: String, target: String, kind: String,
+	attempt: int, error: String, failed_code: String
+) -> bool:
+	if _bp_seq >= MAX_TOTAL_TASKS:
+		return false
+	_bp_seq += 1
+	var node: AIPlanNode = _planner.add_task(
+		title, _bp_milestone_id, "CodeEngineer"
+	)
+	_planner.add_action("Yaz: " + target, node.id)
+	var entry: Dictionary = {
+		"id": _bp_seq,
+		"title": title,
+		"target_file": target,
+		"kind": kind,
+		"attempt": attempt,
+		"status": "bekliyor",
+		"error": error,
+		"failed_code": failed_code,
+		"node_id": node.id,
+	}
+	_bp_registry.append(entry)
+	_bp_queue.append(entry)
+	return true
+
+
 func _run_next_task() -> void:
-	if _bp_idx >= _bp_tasks.size():
+	if _bp_queue.is_empty():
 		_finalize_build_plan()
 		return
-	var t: Dictionary = _bp_tasks[_bp_idx]
-	pipeline_progress.emit("Görev %d/%d: %s" % [
-		_bp_idx + 1, _bp_tasks.size(), str(t["title"])
-	])
-	var instruction: String = (
-		"ALT GÖREV: " + str(t["title"]) + "\n"
-		+ "GENEL HEDEF: " + _bp_goal + "\n"
-		+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
-		+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
+	_bp_current = _bp_queue.pop_front()
+	_bp_current["status"] = "çalışıyor"
+	var total: int = _bp_registry.size()
+	var label: String = "Görev %d/%d: %s" % [
+		int(_bp_current["id"]), total, str(_bp_current["title"])
+	]
+	if str(_bp_current["kind"]) == "repair":
+		label = "Onarım %d/%d: %s" % [
+			int(_bp_current["id"]), total, str(_bp_current["title"])
+		]
+	pipeline_progress.emit(label)
+	_emit_tasks()
+	var instruction: String = _build_task_instruction(_bp_current)
+	var mode: String = (
+		"repair" if str(_bp_current["kind"]) == "repair" else "full"
 	)
+	_chain.run(instruction, _bp_model, mode)
+
+
+## Göreve göre LLM talimatı kurar (üretim vs onarım).
+func _build_task_instruction(t: Dictionary) -> String:
+	var instruction: String
+	if str(t["kind"]) == "repair":
+		instruction = (
+			"ONARIM GÖREVİ. Aşağıdaki dosya Godot 4.6 derlemesinden "
+			+ "GEÇMEDİ.\nHEDEF DOSYA: " + str(t["target_file"]) + "\n"
+			+ "DOĞRULAMA HATASI: " + str(t["error"]) + "\n"
+			+ "HATALI KOD:\n```\n" + str(t["failed_code"]) + "\n```\n"
+			+ "Godot 4.6 API kurallarına UYARAK hatayı gider; TAM, "
+			+ "derlenebilir düzeltilmiş dosyayı tek parça ver."
+		)
+	else:
+		instruction = (
+			"ALT GÖREV: " + str(t["title"]) + "\n"
+			+ "GENEL HEDEF: " + _bp_goal + "\n"
+			+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
+			+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
+		)
 	if not _bp_classes.is_empty():
 		instruction += (
 			"\n\nZATEN ÜRETİLEN SINIFLAR (atıf gerekiyorsa BU gerçek "
@@ -297,7 +373,38 @@ func _run_next_task() -> void:
 		)
 	if not _bp_project.strip_edges().is_empty():
 		instruction += "\n\n" + _bp_project
-	_chain.run(instruction, _bp_model)
+	return instruction
+
+
+## Canlı görev listesi anlık görüntüsü — UI paneli + test için.
+func task_registry() -> Array:
+	var out: Array = []
+	for e in _bp_registry:
+		out.append({
+			"id": int(e["id"]),
+			"title": str(e["title"]),
+			"target_file": str(e["target_file"]),
+			"kind": str(e["kind"]),
+			"attempt": int(e["attempt"]),
+			"status": str(e["status"]),
+			"error": str(e["error"]),
+		})
+	return out
+
+
+func _emit_tasks() -> void:
+	tasks_updated.emit(task_registry())
+
+
+## Verifier sonucundaki BAŞARISIZ seviyenin gerçek mesajını çıkarır
+## (onarım turuna ve panele beslenen otoriter tanı).
+func _verify_detail(vr: Dictionary) -> String:
+	for r in vr.get("results", []):
+		var vrr: AIVerificationResult = r
+		if vrr.outcome == AIVerificationResult.Outcome.FAIL:
+			if not vrr.message.strip_edges().is_empty():
+				return vrr.message
+	return "Godot 4.6 derlemesi geçmedi (ayrıntı motor Output'unda)"
 
 
 ## Üretilen koddan class_name'i çıkarır (varsa). Görevler arası
@@ -317,14 +424,19 @@ func _scan_class_name(code: String) -> String:
 func _on_chain_completed(res: Dictionary) -> void:
 	if not _bp_active:
 		return
-	var t: Dictionary = _bp_tasks[_bp_idx]
+	var t: Dictionary = _bp_current
+	# Architect "EK DOSYA:" önerilerini dinamik göreve çevir (yalnız
+	# tam zincirde — onarımda Architect yok).
+	if str(t["kind"]) != "repair":
+		_spawn_from_architect(res)
 	if bool(res.get("ok", false)):
 		var applied: Dictionary = apply_generated_code(
 			str(t["target_file"]), str(res.get("content", "")),
 			str(res.get("role_name", "CodeEngineer"))
 		)
 		if bool(applied.get("needs_approval", false)):
-			# HITL kapısı — döngü durur, şu ana kadarki kısmi sonuç.
+			t["status"] = "onay-bekliyor"
+			t["error"] = str(applied.get("message", ""))
 			var d: Dictionary = _stage(
 				"hitl", false,
 				"İnsan onayı bekleniyor: " + str(applied.get("message", ""))
@@ -332,10 +444,13 @@ func _on_chain_completed(res: Dictionary) -> void:
 			d["needs_approval"] = true
 			d["paths"] = _bp_paths.duplicate()
 			d["failed_tasks"] = _bp_failed.duplicate()
+			d["tasks"] = task_registry()
 			_bp_active = false
+			_emit_tasks()
 			_emit_done(d)
 			return
 		if bool(applied.get("ok", false)):
+			t["status"] = "tamam"
 			_planner.mark_completed(str(t["node_id"]))
 			_bp_paths.append(str(applied.get("path", t["target_file"])))
 			var cls: String = _scan_class_name(
@@ -346,36 +461,113 @@ func _on_chain_completed(res: Dictionary) -> void:
 					"- %s (%s)" % [cls, str(t["target_file"])]
 				)
 		else:
-			_bp_failed.append({
-				"title": str(t["title"]),
-				"reason": str(applied.get("message", "")),
-			})
+			_handle_task_failure(
+				t, str(applied.get("message", "")),
+				str(applied.get("failed_code", ""))
+			)
 	else:
+		_handle_task_failure(t, str(res.get("status_note", "")), "")
+	_emit_tasks()
+	_run_next_task()
+
+
+## Başarısız görevi: sınır içinde dinamik ONARIM görevi doğur,
+## sınır aşılırsa kalıcı başarısız işaretle (kaçak koruması).
+func _handle_task_failure(
+	t: Dictionary, reason: String, failed_code: String
+) -> void:
+	if (int(t["attempt"]) < MAX_REPAIRS_PER_FILE
+			and _bp_seq < MAX_TOTAL_TASKS
+			and not failed_code.strip_edges().is_empty()):
+		t["status"] = "onarılıyor"
+		t["error"] = reason
+		_enqueue_task(
+			"Onar: " + str(t["title"]), str(t["target_file"]),
+			"repair", int(t["attempt"]) + 1, reason, failed_code
+		)
+		pipeline_progress.emit(
+			"Onarım görevi eklendi: " + str(t["title"])
+		)
+	else:
+		t["status"] = "başarısız"
+		t["error"] = reason
 		_bp_failed.append({
 			"title": str(t["title"]),
-			"reason": str(res.get("status_note", "")),
+			"reason": reason,
 		})
-	_bp_idx += 1
-	_run_next_task()
+
+
+## Architect çıktısındaki `EK DOSYA: ad.gd — amaç` satırlarını
+## yeni dinamik görevlere çevirir (sınırlı, tekrarsız).
+func _spawn_from_architect(res: Dictionary) -> void:
+	var arch_name: String = AICellRoles.role_name(
+		AICellRoles.Role.ARCHITECT
+	)
+	for entry in res.get("transcript", []):
+		if str(entry.get("role", "")) != arch_name:
+			continue
+		for raw_line in str(entry.get("content", "")).split("\n"):
+			var line: String = str(raw_line).strip_edges()
+			if not line.begins_with("EK DOSYA:"):
+				continue
+			if (_bp_spawned >= MAX_ARCHITECT_SPAWN
+					or _bp_seq >= MAX_TOTAL_TASKS):
+				return
+			var body: String = line.substr(9).strip_edges()
+			var sep: int = body.find("—")
+			if sep == -1:
+				sep = body.find(" - ")
+			var fname: String = body
+			var purpose: String = body
+			if sep != -1:
+				fname = body.substr(0, sep).strip_edges()
+				purpose = body.substr(sep + 1).strip_edges()
+			var target: String = _decomposer.sanitize_target(
+				fname, purpose
+			)
+			if _has_target(target):
+				continue
+			if _enqueue_task(
+				(purpose if not purpose.is_empty() else fname),
+				target, "gen", 0, "", ""
+			):
+				_bp_spawned += 1
+				pipeline_progress.emit(
+					"Architect ek görev önerdi: " + target
+				)
+
+
+func _has_target(target: String) -> bool:
+	for e in _bp_registry:
+		if str(e["target_file"]) == target:
+			return true
+	return false
 
 
 func _finalize_build_plan() -> void:
 	_bp_active = false
-	var done: int = _bp_paths.size()
-	var fail: int = _bp_failed.size()
-	var total: int = _bp_tasks.size()
+	var done: int = 0
+	var fail: int = 0
+	for e in _bp_registry:
+		if str(e["status"]) == "tamam":
+			done += 1
+		elif str(e["status"]) == "başarısız":
+			fail += 1
+	var total: int = _bp_registry.size()
 	var ok: bool = fail == 0 and done > 0
 	var msg: String
 	if done == 0:
 		msg = "Hiçbir alt görev üretilemedi"
 	elif fail == 0:
-		msg = "%d/%d alt görev tamamlandı" % [done, total]
+		msg = "%d/%d görev tamamlandı" % [done, total]
 	else:
 		msg = "%d/%d tamam, %d başarısız" % [done, total, fail]
 	var d: Dictionary = _stage("build_plan", ok, msg)
 	d["paths"] = _bp_paths.duplicate()
 	d["failed_tasks"] = _bp_failed.duplicate()
 	d["plan_progress"] = _planner.progress()
+	d["tasks"] = task_registry()
+	_emit_tasks()
 	_emit_done(d)
 
 

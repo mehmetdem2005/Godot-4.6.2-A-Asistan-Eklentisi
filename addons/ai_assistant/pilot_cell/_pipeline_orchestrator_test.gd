@@ -31,7 +31,101 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Plan", _test_build_plan_no_bridge()))
 	results.append(_b("E2E: Plan", _test_build_plan_no_router()))
 	results.append(_b("E2E: Plan", _test_scan_class_name()))
+	results.append(_b("E2E: Dinamik", _test_enqueue_registry_cap()))
+	results.append(_b("E2E: Dinamik", _test_repair_spawn_and_bound()))
+	results.append(_b("E2E: Dinamik", _test_spawn_from_architect()))
+	results.append(_b("E2E: Dinamik", _test_status_color_consistency()))
 	return results
+
+
+## Planner milestone'u hazır, dinamik kuyruğu test edilebilir orkestratör.
+static func _planned() -> AIPipelineOrchestrator:
+	var o := AIPipelineOrchestrator.new()
+	var g: AIPlanNode = o._planner.start_plan("hedef")
+	var m: AIPlanNode = o._planner.add_milestone("Üretim", g.id)
+	o._bp_milestone_id = m.id
+	o._bp_active = true
+	return o
+
+
+static func _test_enqueue_registry_cap() -> Dictionary:
+	var name := "Görev kuyruğu MAX_TOTAL_TASKS ile sınırlı (kaçak yok)"
+	var o := _planned()
+	var added := 0
+	for i in AIPipelineOrchestrator.MAX_TOTAL_TASKS + 8:
+		if o._enqueue_task("G%d" % i, "user://u/g%d.gd" % i,
+				"gen", 0, "", ""):
+			added += 1
+	var reg: Array = o.task_registry()
+	o.free()
+	if added != AIPipelineOrchestrator.MAX_TOTAL_TASKS:
+		return _fail(name, "sınır uygulanmadı: %d" % added)
+	if reg.size() != AIPipelineOrchestrator.MAX_TOTAL_TASKS:
+		return _fail(name, "registry sınırı yanlış: %d" % reg.size())
+	if str(reg[0]["status"]) != "bekliyor":
+		return _fail(name, "yeni görev 'bekliyor' olmalı")
+	return _ok(name)
+
+
+static func _test_repair_spawn_and_bound() -> Dictionary:
+	var name := "Hata → sınırlı onarım görevi, sınırda kalıcı başarısız"
+	var o := _planned()
+	o._enqueue_task("Oyuncu", "user://u/p.gd", "gen", 0, "", "")
+	var cur: Dictionary = o._bp_queue.pop_front()
+	# 1. hata: onarım görevi doğmalı
+	o._handle_task_failure(cur, "syntactic: xx", "extends Node")
+	if o._bp_queue.size() != 1:
+		o.free()
+		return _fail(name, "onarım görevi kuyruğa eklenmedi")
+	if str(cur["status"]) != "onarılıyor":
+		o.free()
+		return _fail(name, "kaynak görev 'onarılıyor' olmalı")
+	var rep: Dictionary = o._bp_queue[0]
+	if str(rep["kind"]) != "repair" or int(rep["attempt"]) != 1:
+		o.free()
+		return _fail(name, "onarım görevi kind/attempt yanlış")
+	# Sınırda (attempt=MAX): artık başarısız, _bp_failed dolar
+	var maxed: Dictionary = {
+		"title": "Oyuncu", "target_file": "user://u/p.gd",
+		"kind": "repair",
+		"attempt": AIPipelineOrchestrator.MAX_REPAIRS_PER_FILE,
+		"status": "çalışıyor", "error": "", "node_id": "x",
+	}
+	o._handle_task_failure(maxed, "yine hata", "extends Node")
+	o.free()
+	if str(maxed["status"]) != "başarısız":
+		return _fail(name, "sınırda 'başarısız' olmalı")
+	return _ok(name)
+
+
+static func _test_spawn_from_architect() -> Dictionary:
+	var name := "Architect 'EK DOSYA' satırı dinamik görev doğurur (tekrarsız)"
+	var o := _planned()
+	o._decomposer = AIPlanDecomposer.new()
+	var res := {
+		"transcript": [
+			{"role": "Architect", "content":
+				"Yapı:\nEK DOSYA: enemy.gd — Düşman AI\n"
+				+ "EK DOSYA: enemy.gd — kopya (aynı hedef, atlanmalı)"},
+		],
+	}
+	o._spawn_from_architect(res)
+	var reg: Array = o.task_registry()
+	o.free()
+	if reg.size() != 1:
+		return _fail(name, "tek görev (dedup) beklendi: %d" % reg.size())
+	if not str(reg[0]["target_file"]).begins_with("user://"):
+		return _fail(name, "güvenli hedef yolu üretilmeli")
+	return _ok(name)
+
+
+static func _test_status_color_consistency() -> Dictionary:
+	var name := "Tüm görev durumları UI renk haritasında tanımlı"
+	for st in ["bekliyor", "çalışıyor", "onarılıyor", "onay-bekliyor",
+			"tamam", "başarısız"]:
+		if not AIStudioScreen.STATUS_COLORS.has(st):
+			return _fail(name, "UI renk eksik: " + st)
+	return _ok(name)
 
 
 static func _test_scan_class_name() -> Dictionary:

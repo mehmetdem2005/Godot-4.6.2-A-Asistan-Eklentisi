@@ -25,7 +25,43 @@ static func run_all() -> Array:
 	results.append(_b("Chain: Bölünme", _test_join_clean_strips_fences()))
 	results.append(_b("Chain: Bölünme", _test_tail_keeps_end()))
 	results.append(_b("Chain: Bölünme", _test_chunk_bound()))
+	results.append(_b("Chain: Onarım", _test_repair_mode_two_steps()))
+	results.append(_b("Chain: Onarım", _test_full_mode_three_steps()))
 	return results
+
+
+static func _test_repair_mode_two_steps() -> Dictionary:
+	var name := "Onarım modu Architect'siz (CodeEngineer→Reviewer)"
+	var r := _new()
+	var bridge := AIAgentLiveBridge.new()
+	r.attach_bridge(bridge)
+	# Router yok → think_live SENKRON çöker; ama _steps run()'da
+	# mode'a göre kurulur (çöküşten önce).
+	r.run("hatalı kodu onar", "", "repair")
+	var steps: Array = r._steps
+	bridge.free()
+	r.free()
+	if steps.size() != 2:
+		return _fail(name, "onarım 2 adım olmalı: %d" % steps.size())
+	if int(steps[0]) != AICellRoles.Role.CODE_ENGINEER:
+		return _fail(name, "ilk adım CodeEngineer olmalı")
+	if int(steps[1]) != AICellRoles.Role.REVIEWER:
+		return _fail(name, "ikinci adım Reviewer olmalı")
+	return _ok(name)
+
+
+static func _test_full_mode_three_steps() -> Dictionary:
+	var name := "Tam mod Architect→CodeEngineer→Reviewer (geriye uyumlu)"
+	var r := _new()
+	var bridge := AIAgentLiveBridge.new()
+	r.attach_bridge(bridge)
+	r.run("üret", "")  # mode varsayılan "full"
+	var steps: Array = r._steps
+	bridge.free()
+	r.free()
+	if steps.size() != 3 or int(steps[0]) != AICellRoles.Role.ARCHITECT:
+		return _fail(name, "tam mod 3 adım/Architect başlamalı")
+	return _ok(name)
 
 
 static func _test_join_clean_strips_fences() -> Dictionary:
