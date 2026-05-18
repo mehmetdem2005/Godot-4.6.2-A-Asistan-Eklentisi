@@ -20,6 +20,7 @@ static func run_all() -> Array:
 	results.append(_b("KeyStore", _test_empty_rejected()))
 	results.append(_b("KeyStore", _test_tamper_detection()))
 	results.append(_b("KeyStore", _test_multi_provider()))
+	results.append(_b("KeyStore", _test_whitespace_trimmed()))
 	return results
 
 
@@ -54,6 +55,26 @@ static func _test_encrypt_roundtrip() -> Dictionary:
 		return _fail(name, "anahtar çözülemedi: " + str(got["reason"]))
 	if str(got["key"]) != secret:
 		return _fail(name, "çözülen anahtar orijinalle aynı değil")
+	return _ok(name)
+
+
+static func _test_whitespace_trimmed() -> Dictionary:
+	# Regresyon: mobilde yapıştırınca anahtara eklenen "\n"/boşluk
+	# "Bearer sk-...\n" yapıp DeepSeek 401 üretiyordu. store_key
+	# baş/son boşluğu kırpmalı; çözülen anahtar temiz olmalı.
+	var name := "Anahtar baş/son boşluk kırpılır (401 regresyonu)"
+	var store := AIAPIKeyStore.new()
+	var clean := "sk-deepseek-clean-key-abcdef0123456789"
+	var saved: Dictionary = store.store_key(
+		"deepseek", "  " + clean + "\n"
+	)
+	if not bool(saved["saved"]):
+		return _fail(name, "kaydedilemedi: " + str(saved["reason"]))
+	var got: Dictionary = store.retrieve_key("deepseek")
+	if not bool(got["ok"]):
+		return _fail(name, "çözülemedi: " + str(got["reason"]))
+	if str(got["key"]) != clean:
+		return _fail(name, "çözülen anahtar kırpılmamış: " + str(got["key"]))
 	return _ok(name)
 
 

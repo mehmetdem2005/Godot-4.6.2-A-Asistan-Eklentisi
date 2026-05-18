@@ -76,11 +76,16 @@ func store_key(provider_name: String, plaintext_key: String) -> Dictionary:
 	if plaintext_key.strip_edges().is_empty():
 		return {"saved": false, "reason": "API anahtarı boş"}
 
+	# Baş/son boşluk ve satır sonu temizle. Mobilde yapıştırınca
+	# anahtara eklenen "\n"/boşluk "Bearer sk-...\n" yapıp 401 üretir.
+	# API anahtarları asla baş/son boşluk içermez — güvenle kırpılır.
+	var clean_key: String = plaintext_key.strip_edges()
+
 	# Rastgele IV üret (her şifreleme için benzersiz)
 	var iv: PackedByteArray = _random_bytes(BLOCK_SIZE)
 
 	# Düz metni blok boyutuna pad'le (PKCS7)
-	var plain_bytes: PackedByteArray = plaintext_key.to_utf8_buffer()
+	var plain_bytes: PackedByteArray = clean_key.to_utf8_buffer()
 	var padded: PackedByteArray = _pkcs7_pad(plain_bytes)
 
 	# AES-256-CBC şifrele
