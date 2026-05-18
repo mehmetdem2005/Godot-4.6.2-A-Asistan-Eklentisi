@@ -391,14 +391,26 @@ func _run_next_task() -> void:
 func _build_task_instruction(t: Dictionary) -> String:
 	var instruction: String
 	if str(t["kind"]) == "repair":
-		instruction = (
-			"ONARIM GÖREVİ. Aşağıdaki dosya Godot 4.6 derlemesinden "
-			+ "GEÇMEDİ.\nHEDEF DOSYA: " + str(t["target_file"]) + "\n"
-			+ "DOĞRULAMA HATASI: " + str(t["error"]) + "\n"
-			+ "HATALI KOD:\n```\n" + str(t["failed_code"]) + "\n```\n"
-			+ "Godot 4.6 API kurallarına UYARAK hatayı gider; TAM, "
-			+ "derlenebilir düzeltilmiş dosyayı tek parça ver."
-		)
+		var rtarget: String = str(t["target_file"])
+		if rtarget.ends_with(".tscn"):
+			instruction = (
+				"ONARIM GÖREVİ. Aşağıdaki SAHNE (.tscn) doğrulamadan "
+				+ "GEÇMEDİ.\nHEDEF DOSYA: " + rtarget + "\n"
+				+ "DOĞRULAMA HATASI: " + str(t["error"]) + "\n"
+				+ "HATALI SAHNE:\n```\n" + str(t["failed_code"]) + "\n```\n"
+				+ "Hatayı gider; SADECE geçerli .tscn metni ver "
+				+ "(markdown/açıklama YAZMA).\n\n"
+				+ AIRolePrompts.TSCN_CONTRACT
+			)
+		else:
+			instruction = (
+				"ONARIM GÖREVİ. Aşağıdaki dosya Godot 4.6 derlemesinden "
+				+ "GEÇMEDİ.\nHEDEF DOSYA: " + rtarget + "\n"
+				+ "DOĞRULAMA HATASI: " + str(t["error"]) + "\n"
+				+ "HATALI KOD:\n```\n" + str(t["failed_code"]) + "\n```\n"
+				+ "Godot 4.6 API kurallarına UYARAK hatayı gider; TAM, "
+				+ "derlenebilir düzeltilmiş dosyayı tek parça ver."
+			)
 	else:
 		var target: String = str(t["target_file"])
 		if target.ends_with(".tscn"):

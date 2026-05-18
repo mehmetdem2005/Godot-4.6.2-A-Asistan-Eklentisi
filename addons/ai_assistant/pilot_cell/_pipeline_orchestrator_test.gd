@@ -37,7 +37,31 @@ static func run_all() -> Array:
 	results.append(_b("E2E: Dinamik", _test_status_color_consistency()))
 	results.append(_b("E2E: Sahne", _test_verify_scene_text()))
 	results.append(_b("E2E: Sahne", _test_scene_target_skips_gd_verify()))
+	results.append(_b("E2E: Sahne", _test_scene_repair_instruction()))
 	return results
+
+
+static func _test_scene_repair_instruction() -> Dictionary:
+	var name := ".tscn onarım talimatı sahne-bilinçli (GDScript değil)"
+	var o := _new()
+	var scene_rep: String = o._build_task_instruction({
+		"kind": "repair", "title": "Ana Sahne",
+		"target_file": "res://game/scenes/main.tscn",
+		"error": "[gd_scene başlığı yok", "failed_code": "[node x]",
+	})
+	var gd_rep: String = o._build_task_instruction({
+		"kind": "repair", "title": "Oyuncu",
+		"target_file": "res://game/scripts/player.gd",
+		"error": "parse error", "failed_code": "func (",
+	})
+	o.free()
+	if not scene_rep.contains("SAHNE") or not scene_rep.contains("[gd_scene"):
+		return _fail(name, "sahne onarımı sahne dilini kullanmalı")
+	if scene_rep.contains("GDScript derlemesi"):
+		return _fail(name, "sahne onarımı GDScript çerçevesi kullanmamalı")
+	if not gd_rep.contains("derlenebilir"):
+		return _fail(name, ".gd onarımı GDScript çerçevesini korumalı")
+	return _ok(name)
 
 
 static func _test_verify_scene_text() -> Dictionary:
