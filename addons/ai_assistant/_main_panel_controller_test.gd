@@ -27,6 +27,11 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Model", _test_model_valid_set()))
 	results.append(_b("Panel: Model", _test_model_invalid_rejected()))
 	results.append(_b("Panel: Sohbet", _test_chat_log()))
+	results.append(_b("Panel: Hafıza", _test_history_filters_system()))
+	results.append(_b("Panel: Hafıza", _test_history_drops_last_user()))
+	results.append(_b("Panel: Hafıza", _test_history_turn_window()))
+	results.append(_b("Panel: Hafıza", _test_history_char_budget()))
+	results.append(_b("Panel: Hafıza", _test_history_empty()))
 	results.append(_b("Panel: Sıfırla", _test_reset_clears_working_queue()))
 	results.append(_b("Panel: Sıfırla", _test_reset_preserves_episodic()))
 	return results
@@ -250,6 +255,86 @@ static func _test_chat_log() -> Dictionary:
 		return _fail(name, "ilk mesaj kullanıcı/merhaba olmalı")
 	if str(msgs[1]["role"]) != "assistant":
 		return _fail(name, "ikinci mesaj asistan olmalı")
+	return _ok(name)
+
+
+# ============================================================
+# ÇOK-TURLU HAFIZA (Plan C — conversation_history)
+# ============================================================
+
+static func _test_history_filters_system() -> Dictionary:
+	var name := "Geçmiş yalnız gerçek user/assistant turlarını alır"
+	var c := _c()
+	c.add_message("user", "ilk soru")
+	c.add_message("system", "… Asistan yanıtlıyor…")
+	c.add_message("assistant", "ilk cevap")
+	c.add_message("system", "✓ [chat] tamam")
+	c.add_message("assistant", "⚠ iz satırı sayılmaz")
+	c.add_message("user", "ikinci soru")
+	var h: Array = c.conversation_history()
+	# Son user (ikinci soru) DROP edilir; sistem/iz satırları ayıklanır.
+	if h.size() != 2:
+		return _fail(name, "2 tur beklendi: %d" % h.size())
+	if str(h[0]["role"]) != "user" or str(h[0]["content"]) != "ilk soru":
+		return _fail(name, "ilk tur user/ilk soru olmalı")
+	if str(h[1]["role"]) != "assistant" or str(h[1]["content"]) != "ilk cevap":
+		return _fail(name, "iz/sistem satırları sızdı")
+	return _ok(name)
+
+
+static func _test_history_drops_last_user() -> Dictionary:
+	var name := "Son kullanıcı turu düşürülür (think_chat ekler)"
+	var c := _c()
+	c.add_message("user", "a")
+	c.add_message("assistant", "b")
+	c.add_message("user", "guncel mesaj")
+	var h: Array = c.conversation_history()
+	if h.size() != 2:
+		return _fail(name, "güncel user dışlanmalı: %d" % h.size())
+	if str(h[-1]["content"]) == "guncel mesaj":
+		return _fail(name, "güncel mesaj geçmişte tekrarlanmamalı")
+	return _ok(name)
+
+
+static func _test_history_turn_window() -> Dictionary:
+	var name := "Tur penceresi en yeni max_turns turu tutar"
+	var c := _c()
+	for i in 10:
+		c.add_message("user", "s%d" % i)
+		c.add_message("assistant", "c%d" % i)
+	# Son user yok (çift sonlanıyor: ...assistant) → drop tetiklenmez.
+	var h: Array = c.conversation_history(4)
+	if h.size() != 4:
+		return _fail(name, "4 tur beklendi: %d" % h.size())
+	if str(h[-1]["content"]) != "c9":
+		return _fail(name, "en yeni tur korunmalı: " + str(h[-1]["content"]))
+	return _ok(name)
+
+
+static func _test_history_char_budget() -> Dictionary:
+	var name := "Karakter bütçesi en eski turu baştan atar"
+	var c := _c()
+	c.add_message("user", "X".repeat(100))
+	c.add_message("assistant", "Y".repeat(100))
+	c.add_message("user", "Z".repeat(100))
+	c.add_message("assistant", "son kısa")
+	var h: Array = c.conversation_history(12, 150)
+	# Bütçe 150 → en eskiler atılır, en az 1 tur kalır.
+	if h.size() >= 4:
+		return _fail(name, "bütçe kırpması olmadı: %d" % h.size())
+	if h.is_empty():
+		return _fail(name, "en az bir tur kalmalı")
+	if str(h[-1]["content"]) != "son kısa":
+		return _fail(name, "en yeni tur korunmalı")
+	return _ok(name)
+
+
+static func _test_history_empty() -> Dictionary:
+	var name := "Boş sohbet → boş geçmiş (geriye uyumlu)"
+	var c := _c()
+	var h: Array = c.conversation_history()
+	if not h.is_empty():
+		return _fail(name, "boş olmalı")
 	return _ok(name)
 
 

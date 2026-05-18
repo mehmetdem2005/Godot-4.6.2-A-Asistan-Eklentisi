@@ -299,14 +299,15 @@ func _on_send() -> void:
 	if intent == AIMainPanelController.Intent.CHAT:
 		_ctrl.add_message("system", "… Asistan yanıtlıyor…")
 		_redraw_chat()
-		_orch.run_chat(task, _ctrl.model_name())
-	else:
-		_ctrl.add_message("system", "… Ajan düşünüyor (kod üretimi)…")
-		_redraw_chat()
-		_orch.run_task(
-			"Sohbet görevi", _ctrl.default_target_path(task),
-			task, AICellRoles.Role.CODE_ENGINEER, _ctrl.model_name()
+		_orch.run_chat(
+			task, _ctrl.model_name(), _ctrl.conversation_history()
 		)
+	else:
+		_ctrl.add_message(
+			"system", "… Plan çıkarılıyor (çok-adımlı üretim)…"
+		)
+		_redraw_chat()
+		_orch.run_build_plan(task, task, _ctrl.model_name())
 
 
 func _on_progress(step: String) -> void:
@@ -328,6 +329,14 @@ func _on_pipeline_done(result: Dictionary) -> void:
 		]
 		if result.has("path"):
 			msg += "\nDosya: " + str(result["path"])
+		if result.has("paths"):
+			for p in result["paths"]:
+				msg += "\nDosya: " + str(p)
+		if result.has("failed_tasks"):
+			for ft in result["failed_tasks"]:
+				msg += "\n⚠ Başarısız: %s — %s" % [
+					str(ft.get("title", "")), str(ft.get("reason", "")),
+				]
 		_ctrl.add_message("assistant", msg)
 	_running = false
 	_send_btn.disabled = false

@@ -36,6 +36,18 @@ var _active_path: String = ""
 var _active_role_name: String = ""
 var _chat_mode: bool = false
 
+# --- Çok-adımlı plan (Plan C) ---
+var _decomposer: AIPlanDecomposer = null
+var _chain: AIRoleChainRunner = null
+var _aux_bridge: AIAgentLiveBridge = null
+var _bp_active: bool = false
+var _bp_goal: String = ""
+var _bp_model: String = ""
+var _bp_tasks: Array = []
+var _bp_idx: int = 0
+var _bp_paths: Array = []
+var _bp_failed: Array = []
+
 
 func _init() -> void:
 	_verifier = AIVerifierEngine.new()
@@ -161,7 +173,11 @@ func run_task(
 ## Doğal SOHBET — kod hattı YOK (Verifier/HITL/Executor atlanır).
 ## Sıradan mesaj/soru için: LLM yanıtı doğrudan döner, dosya yazılmaz.
 ## Sonuç 'pipeline_completed' ile gelir (stage="chat").
-func run_chat(message: String, model: String = "") -> bool:
+## history: çok-turlu hafıza [{role, content}] (eski→yeni). Boş =
+## eski stateless davranış (geriye uyumlu).
+func run_chat(
+	message: String, model: String = "", history: Array = []
+) -> bool:
 	if _bridge == null:
 		_emit_done(_stage("bridge", false, "Canlı köprü bağlı değil"))
 		return false
@@ -171,7 +187,162 @@ func run_chat(message: String, model: String = "") -> bool:
 		_bridge.thought_completed.connect(_on_thought)
 
 	pipeline_progress.emit("Asistan yanıtlıyor (canlı)...")
-	return _bridge.think_chat(message, model)
+	return _bridge.think_chat(message, model, history)
+
+
+## ASENKRON ÇOK-ADIMLI ZİNCİR (Plan C): büyük BUILD isteği →
+## Decomposer (alt görevler) → her görev için çoklu rol hattı
+## (Architect→CodeEngineer→Reviewer) → kod çıkar → SENKRON çekirdek
+## (verify→HITL→Executor) → sıradaki görev. Sonuç 'pipeline_completed'
+## ile gelir (stage="build_plan"; paths[] + failed_tasks[]).
+## Kısmi başarısızlık: o görev failed_tasks'e girer, döngü sürer.
+## HITL onay isterse döngü DURUR (kısmi sonuç + needs_approval).
+func run_build_plan(
+	goal_title: String, instruction: String, model: String = ""
+) -> bool:
+	if _bridge == null:
+		_emit_done(_stage("bridge", false, "Canlı köprü bağlı değil"))
+		return false
+	var router: AIProviderRouter = _bridge.router()
+	if router == null:
+		_emit_done(_stage(
+			"bridge", false, "Router yok — çok-adımlı plan çalışamaz"
+		))
+		return false
+
+	_chat_mode = false
+	_bp_active = true
+	_bp_goal = instruction
+	_bp_model = model
+	_bp_tasks = []
+	_bp_idx = 0
+	_bp_paths = []
+	_bp_failed = []
+
+	# Yardımcı köprü: decomposer + zincir SIRAYLA kullanır (tek köprü,
+	# çakışmasız — decomposer biter, sonra zincir başlar).
+	_aux_bridge = AIAgentLiveBridge.new()
+	add_child(_aux_bridge)
+	_aux_bridge.attach_router(router)
+
+	_decomposer = AIPlanDecomposer.new()
+	add_child(_decomposer)
+	_decomposer.attach_bridge(_aux_bridge)
+	_decomposer.decomposed.connect(_on_decomposed)
+
+	_chain = AIRoleChainRunner.new()
+	add_child(_chain)
+	_chain.attach_bridge(_aux_bridge)
+	_chain.chain_progress.connect(_on_chain_progress)
+	_chain.chain_completed.connect(_on_chain_completed)
+
+	pipeline_progress.emit("İstek alt görevlere bölünüyor...")
+	return _decomposer.decompose(instruction, model)
+
+
+func _on_chain_progress(step: String) -> void:
+	pipeline_progress.emit(step)
+
+
+func _on_decomposed(tasks: Array) -> void:
+	var goal: AIPlanNode = _planner.start_plan(_bp_goal)
+	var milestone: AIPlanNode = _planner.add_milestone("Üretim", goal.id)
+	for t in tasks:
+		var title: String = str(t.get("title", "")).strip_edges()
+		var target: String = str(t.get("target_file", "")).strip_edges()
+		if title.is_empty() or target.is_empty():
+			continue
+		var node: AIPlanNode = _planner.add_task(
+			title, milestone.id, "CodeEngineer"
+		)
+		_planner.add_action("Yaz: " + target, node.id)
+		_bp_tasks.append({
+			"title": title,
+			"target_file": target,
+			"node_id": node.id,
+		})
+	if _bp_tasks.is_empty():
+		_finalize_build_plan()
+		return
+	pipeline_progress.emit(
+		"%d alt görev bulundu" % _bp_tasks.size()
+	)
+	_run_next_task()
+
+
+func _run_next_task() -> void:
+	if _bp_idx >= _bp_tasks.size():
+		_finalize_build_plan()
+		return
+	var t: Dictionary = _bp_tasks[_bp_idx]
+	pipeline_progress.emit("Görev %d/%d: %s" % [
+		_bp_idx + 1, _bp_tasks.size(), str(t["title"])
+	])
+	var instruction: String = (
+		"ALT GÖREV: " + str(t["title"]) + "\n"
+		+ "GENEL HEDEF: " + _bp_goal + "\n"
+		+ "SADECE bu alt görev için tek dosyalık, tam ve geçerli "
+		+ "GDScript üret; markdown kod bloğunda ver, açıklama yazma."
+	)
+	_chain.run(instruction, _bp_model)
+
+
+func _on_chain_completed(res: Dictionary) -> void:
+	if not _bp_active:
+		return
+	var t: Dictionary = _bp_tasks[_bp_idx]
+	if bool(res.get("ok", false)):
+		var applied: Dictionary = apply_generated_code(
+			str(t["target_file"]), str(res.get("content", "")),
+			str(res.get("role_name", "CodeEngineer"))
+		)
+		if bool(applied.get("needs_approval", false)):
+			# HITL kapısı — döngü durur, şu ana kadarki kısmi sonuç.
+			var d: Dictionary = _stage(
+				"hitl", false,
+				"İnsan onayı bekleniyor: " + str(applied.get("message", ""))
+			)
+			d["needs_approval"] = true
+			d["paths"] = _bp_paths.duplicate()
+			d["failed_tasks"] = _bp_failed.duplicate()
+			_bp_active = false
+			_emit_done(d)
+			return
+		if bool(applied.get("ok", false)):
+			_planner.mark_completed(str(t["node_id"]))
+			_bp_paths.append(str(applied.get("path", t["target_file"])))
+		else:
+			_bp_failed.append({
+				"title": str(t["title"]),
+				"reason": str(applied.get("message", "")),
+			})
+	else:
+		_bp_failed.append({
+			"title": str(t["title"]),
+			"reason": str(res.get("status_note", "")),
+		})
+	_bp_idx += 1
+	_run_next_task()
+
+
+func _finalize_build_plan() -> void:
+	_bp_active = false
+	var done: int = _bp_paths.size()
+	var fail: int = _bp_failed.size()
+	var total: int = _bp_tasks.size()
+	var ok: bool = fail == 0 and done > 0
+	var msg: String
+	if done == 0:
+		msg = "Hiçbir alt görev üretilemedi"
+	elif fail == 0:
+		msg = "%d/%d alt görev tamamlandı" % [done, total]
+	else:
+		msg = "%d/%d tamam, %d başarısız" % [done, total, fail]
+	var d: Dictionary = _stage("build_plan", ok, msg)
+	d["paths"] = _bp_paths.duplicate()
+	d["failed_tasks"] = _bp_failed.duplicate()
+	d["plan_progress"] = _planner.progress()
+	_emit_done(d)
 
 
 func _on_thought(thought: Dictionary) -> void:
