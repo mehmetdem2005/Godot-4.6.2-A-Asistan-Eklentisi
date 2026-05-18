@@ -35,11 +35,13 @@ var _chat_view: Control = null
 var _chat_log: RichTextLabel = null
 var _input_edit: TextEdit = null
 var _send_btn: Button = null
+var _status_label: Label = null
 
 # Ayarlar görünümü
 var _settings_view: Control = null
 var _key_edit: LineEdit = null
 var _model_option: OptionButton = null
+var _live_check: CheckBox = null
 
 # Workspace görünümü
 var _workspace_view: Control = null
@@ -56,6 +58,7 @@ func _ready() -> void:
 	_build_ui()
 	_apply_view(View.CHAT)
 	_redraw_chat()
+	_refresh_status()
 
 
 # ============================================================
@@ -113,25 +116,39 @@ func _build_header() -> Control:
 func _build_chat_view() -> Control:
 	var col := VBoxContainer.new()
 	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_theme_constant_override("separation", 8)
 
+	# Durum şeridi — Canlı/Anahtar/Model neden gönderilemiyor belli olsun.
+	_status_label = Label.new()
+	_status_label.add_theme_font_size_override("font_size", 13)
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_status_label)
+
+	# Konuşma alanı — TÜM boş dikey alanı kaplar (en büyük bölge).
 	_chat_log = RichTextLabel.new()
 	_chat_log.bbcode_enabled = true
 	_chat_log.scroll_following = true
 	_chat_log.selection_enabled = true
+	_chat_log.focus_mode = Control.FOCUS_NONE
+	_chat_log.custom_minimum_size = Vector2(0, 240)
 	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(_chat_log)
 
+	# Giriş + Gönder — en ALTTA. Klavye açılınca OS bu bölgeyi yukarı iter.
 	_input_edit = TextEdit.new()
 	_input_edit.placeholder_text = (
 		"Ne yapmamı istersin? (Ctrl+Enter ile gönder)"
 	)
-	_input_edit.custom_minimum_size = Vector2(0, 90)
+	_input_edit.custom_minimum_size = Vector2(0, 110)
+	_input_edit.size_flags_vertical = Control.SIZE_SHRINK_END
 	_input_edit.gui_input.connect(_on_input_gui)
 	col.add_child(_input_edit)
 
 	_send_btn = Button.new()
 	_send_btn.text = "Gönder"
+	_send_btn.custom_minimum_size = Vector2(0, 48)
+	_send_btn.size_flags_vertical = Control.SIZE_SHRINK_END
 	_send_btn.pressed.connect(_on_send)
 	col.add_child(_send_btn)
 
@@ -158,6 +175,11 @@ func _build_settings_view() -> Control:
 	key_btn.text = "Anahtarı Kaydet"
 	key_btn.pressed.connect(_on_save_key)
 	key_row.add_child(key_btn)
+
+	_live_check = CheckBox.new()
+	_live_check.text = "Canlı Mod (gerçek LLM çağrısı — Gönder için ŞART)"
+	_live_check.toggled.connect(_on_live_toggled)
+	col.add_child(_live_check)
 
 	var model_lbl := Label.new()
 	model_lbl.text = "Yapay Zeka Modeli:"
@@ -211,6 +233,8 @@ func _apply_view(view: int) -> void:
 		_workspace_view.visible = view == View.WORKSPACE
 	if view == View.WORKSPACE and _workspace_panel != null:
 		_workspace_panel.connect_feed(_ctrl.feed())
+	if view == View.CHAT:
+		_refresh_status()
 
 
 ## Aktif görünüm — test/dış erişim.
@@ -297,6 +321,7 @@ func _on_pipeline_done(result: Dictionary) -> void:
 	_running = false
 	_send_btn.disabled = false
 	_redraw_chat()
+	_refresh_status()
 
 
 func _redraw_chat() -> void:
@@ -324,6 +349,15 @@ func _redraw_chat() -> void:
 # AYARLAR EYLEMLERİ
 # ============================================================
 
+func _on_live_toggled(pressed: bool) -> void:
+	_ctrl.set_live_mode(pressed)
+	_ctrl.add_message(
+		"system", "Canlı mod: " + ("AÇIK" if pressed else "kapalı")
+	)
+	_redraw_chat()
+	_refresh_status()
+
+
 func _on_save_key() -> void:
 	var res: Dictionary = _ctrl.save_api_key(_key_edit.text)
 	if bool(res["ok"]):
@@ -332,6 +366,26 @@ func _on_save_key() -> void:
 	else:
 		_ctrl.add_message("system", "⚠ " + str(res["reason"]))
 	_redraw_chat()
+	_refresh_status()
+
+
+## Durum şeridini günceller — neden gönderilebilir/gönderilemez belli.
+func _refresh_status() -> void:
+	if _status_label == null:
+		return
+	var s: Dictionary = _ctrl.summary()
+	var live: bool = bool(s["live_mode"])
+	var has_key: bool = bool(s["has_key"])
+	var ready: bool = live and has_key
+	var head: String = "● HAZIR" if ready else "○ Gönderilemez"
+	_status_label.text = "%s  |  Canlı: %s  |  Anahtar: %s  |  Model: %s" % [
+		head,
+		("açık" if live else "KAPALI"),
+		("var" if has_key else "YOK"),
+		str(s["model"]),
+	]
+	if _live_check != null:
+		_live_check.button_pressed = live
 
 
 func _on_model_selected(index: int) -> void:
@@ -343,12 +397,14 @@ func _on_model_selected(index: int) -> void:
 	if _ctrl.set_model(model_id):
 		_ctrl.add_message("system", "✓ Model: " + model_id)
 		_redraw_chat()
+		_refresh_status()
 
 
 func _on_reset() -> void:
 	var res: Dictionary = _ctrl.reset_memory_and_queue()
 	_ctrl.add_message("system", str(res["message"]))
 	_redraw_chat()
+	_refresh_status()
 
 
 ## Test/dış erişim — ekranın beyni.

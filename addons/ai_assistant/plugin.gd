@@ -24,6 +24,11 @@ var _window: Window = null
 func _enter_tree() -> void:
 	_screen = AIStudioScreen.new()
 	_screen.name = "AI Asistan"
+	# Editör ana ekranı bir VBoxContainer — dikey/yatay GENİŞLE bayrağı
+	# olmadan ekran minimum boyuta sıkışır (içerik yukarı toplanır,
+	# altta koca boş alan kalır). EXPAND_FILL tüm alanı kaplatır.
+	_screen.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_screen.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
 	EditorInterface.get_editor_main_screen().add_child(_screen)
 	_screen.visible = false
