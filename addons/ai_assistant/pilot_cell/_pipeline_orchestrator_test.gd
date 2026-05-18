@@ -28,7 +28,47 @@ static func run_all() -> Array:
 	results.append(_b("E2E: HITL", _test_hitl_gate_blocks()))
 	results.append(_b("E2E: Durum", _test_no_bridge()))
 	results.append(_b("E2E: Sohbet", _test_chat_no_bridge()))
+	results.append(_b("E2E: Plan", _test_build_plan_no_bridge()))
+	results.append(_b("E2E: Plan", _test_build_plan_no_router()))
 	return results
+
+
+static func _test_build_plan_no_bridge() -> Dictionary:
+	var name := "Köprüsüz run_build_plan dürüst başarısızlık"
+	var o := _new()
+	var captured: Array = []
+	o.pipeline_completed.connect(func(res: Dictionary) -> void:
+		captured.append(res)
+	)
+	var started: bool = o.run_build_plan("hedef", "envanter oyunu yap")
+	o.free()
+	if started:
+		return _fail(name, "köprü yokken başlamamalı")
+	if captured.is_empty() or bool(captured[0]["ok"]):
+		return _fail(name, "bridge aşamasında dürüst hata dönmeli")
+	return _ok(name)
+
+
+static func _test_build_plan_no_router() -> Dictionary:
+	var name := "Router'sız köprüde run_build_plan dürüst durur"
+	var o := _new()
+	var bridge := AIAgentLiveBridge.new()
+	o.attach_bridge(bridge)
+	var captured: Array = []
+	o.pipeline_completed.connect(func(res: Dictionary) -> void:
+		captured.append(res)
+	)
+	var started: bool = o.run_build_plan("hedef", "oyun yap")
+	bridge.free()
+	o.free()
+	if started:
+		return _fail(name, "router yokken başlamamalı")
+	if captured.is_empty() or bool(captured[0]["ok"]):
+		return _fail(name, "router yok → dürüst hata")
+	if str(captured[0]["stage"]) != "bridge":
+		return _fail(name, "bridge aşamasında durmalı: "
+			+ str(captured[0]["stage"]))
+	return _ok(name)
 
 
 static func _test_chat_no_bridge() -> Dictionary:

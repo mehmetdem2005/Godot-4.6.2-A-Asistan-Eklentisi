@@ -137,6 +137,47 @@ func messages() -> Array:
 	return out
 
 
+## Çok-turlu hafıza: LLM'e beslenecek gerçek konuşma geçmişi.
+## messages() kaynaktır ama sistem/iz satırları (… ✓ ⚠ ✗) AYIKLANIR —
+## yalnız gerçek user/assistant turları. En son user turu DROP edilir
+## (think_chat güncel mesajı kendi ekler — _on_send sırası gereği).
+## Kayan pencere: en yeni max_turns tur, toplam char_budget altına
+## kırpılır (en eski taşan baştan atılır). Dönen: [{role, content}]
+## eski→yeni. Kırpma burada (controller) — köprü saf/test edilebilir.
+func conversation_history(
+	max_turns: int = 12, char_budget: int = 6000
+) -> Array:
+	var clean: Array = []
+	for m in messages():
+		var role: String = str(m.get("role", ""))
+		var text: String = str(m.get("text", "")).strip_edges()
+		if role != "user" and role != "assistant":
+			continue
+		if text.is_empty():
+			continue
+		# İz/durum satırları (record_result / _on_progress) gerçek
+		# konuşma değil — bağlama girmemeli.
+		var head: String = text.substr(0, 1)
+		if head == "…" or head == "✓" or head == "⚠" or head == "✗":
+			continue
+		clean.append({"role": role, "content": text})
+	# Güncel kullanıcı mesajı (son user turu) think_chat tarafından
+	# ayrıca eklenir — geçmişte tekrarlanmasın.
+	if not clean.is_empty() and str(clean[-1]["role"]) == "user":
+		clean.remove_at(clean.size() - 1)
+	# Kayan pencere: tur sayısı.
+	if clean.size() > max_turns:
+		clean = clean.slice(clean.size() - max_turns)
+	# Kayan pencere: karakter bütçesi (en eskiyi baştan at).
+	var total: int = 0
+	for t in clean:
+		total += str(t["content"]).length()
+	while clean.size() > 1 and total > char_budget:
+		total -= str(clean[0]["content"]).length()
+		clean.remove_at(0)
+	return clean
+
+
 ## Sohbet olay yayıncısı — workspace Canlı Akış sekmesi buna bağlanır.
 func feed() -> AIFeedEmitter:
 	return _feed

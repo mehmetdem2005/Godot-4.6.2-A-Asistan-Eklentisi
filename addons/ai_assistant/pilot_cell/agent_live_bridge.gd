@@ -56,6 +56,12 @@ func attach_router(router: AIProviderRouter) -> void:
 	_router = router
 
 
+## Bağlı router (çok-adımlı akışta yardımcı köprüler aynı anahtarlı
+## router'ı paylaşsın diye — additive, yan etkisiz).
+func router() -> AIProviderRouter:
+	return _router
+
+
 ## Test/ileri kullanım: dış taşıyıcı enjekte eder (ağaca eklenmiş olmalı).
 func attach_transport(transport: AIHTTPTransport) -> void:
 	_transport = transport
@@ -104,7 +110,11 @@ func think_live(
 ## Doğal SOHBET cevabı için CANLI çağrı (asenkron). Kod hattı değil:
 ## Verifier/HITL/Executor YOK — düz konuşma yanıtı döner.
 ## Sohbet/kod ayrımı kullanıcıyı "syntactic" hatasına boğmasın diye.
-func think_chat(message: String, model: String = "") -> bool:
+## history: önceki konuşma turları [{role, content}] (eski→yeni) —
+## çok-turlu hafıza. Boş = eski stateless davranış (geriye uyumlu).
+func think_chat(
+	message: String, model: String = "", history: Array = []
+) -> bool:
 	if _busy:
 		_emit_fail(-1, "Köprü meşgul — başka bir düşünme sürüyor")
 		return false
@@ -118,13 +128,32 @@ func think_chat(message: String, model: String = "") -> bool:
 	request.add_message("system", (
 		"Rolün: Godot 4.6 oyun motoru için yardımcı, Türkçe konuşan "
 		+ "bir AI asistan. Kullanıcıyla doğal sohbet et; net, kısa ve "
-		+ "yararlı yanıtlar ver. Kod istenmedikçe kod bloğu yazma. "
-		+ "Yanıta kendi rol tanımını tekrar ederek başlama."
+		+ "yararlı yanıtlar ver. Önceki konuşma turlarını dikkate al "
+		+ "(kullanıcı 'az önce' dediğinde geçmişe bak). Kod istenmedikçe "
+		+ "kod bloğu yazma. Yanıta kendi rol tanımını tekrar ederek "
+		+ "başlama."
 	))
+	_append_history(request, history)
 	request.add_message("user", message)
 	if not model.strip_edges().is_empty():
 		request.model = model.strip_edges()
 	return _dispatch(request, -1)
+
+
+## Konuşma geçmişini isteğe ekler (sistem promptu sonrası, güncel
+## kullanıcı mesajından önce). Yalnız user/assistant turları; bozuk
+## girdiler sessizce atlanır (geriye uyumlu — boş history etkisiz).
+func _append_history(request: AIProviderRequest, history: Array) -> void:
+	for turn in history:
+		if typeof(turn) != TYPE_DICTIONARY:
+			continue
+		var role: String = str(turn.get("role", "")).strip_edges()
+		var content: String = str(turn.get("content", "")).strip_edges()
+		if content.is_empty():
+			continue
+		if role != "user" and role != "assistant":
+			continue
+		request.add_message(role, content)
 
 
 ## Hazır bir isteği yönlendirir (cache/ağ) ve sonucu sinyalle döndürür.

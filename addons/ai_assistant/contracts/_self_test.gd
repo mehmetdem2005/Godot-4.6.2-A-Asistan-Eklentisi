@@ -223,6 +223,14 @@ static func run_all() -> Dictionary:
 	for panel_result in AIMainPanelControllerTest.run_all():
 		results.append(panel_result)
 
+	# --- PHASE 33: Plan Bölücü (Plan C — çok-adım) ---
+	for decomp_result in AIPlanDecomposerTest.run_all():
+		results.append(decomp_result)
+
+	# --- PHASE 34: Çoklu Rol Zinciri (Plan C) ---
+	for chain_result in AIRoleChainRunnerTest.run_all():
+		results.append(chain_result)
+
 	return _build_report(results)
 
 
