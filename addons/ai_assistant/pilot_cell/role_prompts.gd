@@ -172,8 +172,11 @@ static func _output_directive(role: int) -> String:
 			return ("ÇIKTI: Net bir hedef cümlesi + 3-5 maddelik "
 				+ "kabul kriteri.")
 		AICellRoles.Role.ARCHITECT:
-			return ("ÇIKTI: Node/script yapısı + her parçanın görevi. "
-				+ "Maddeli liste.")
+			return ("ÇIKTI: Node/script yapısı + her parçanın görevi "
+				+ "(maddeli liste). Bu görevin TEK dosyası dışında EK "
+				+ "dosya GEREKİYORSA, her biri ayrı satır olarak tam "
+				+ "şu biçimde ekle: `EK DOSYA: ad.gd — amacı`. "
+				+ "Gereksizse ekleme.")
 		AICellRoles.Role.DELIVERY_MANAGER:
 			return ("ÇIKTI: Numaralı task listesi. Her task: ne, hangi "
 				+ "rol, bağımlılık.")

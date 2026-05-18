@@ -63,8 +63,10 @@ func attach_bridge(bridge: AIAgentLiveBridge) -> void:
 
 
 ## Bir alt görev için rol zincirini başlatır (asenkron).
-## Sonuç 'chain_completed' ile: {ok, content, transcript, status_note}.
-func run(task: String, model: String = "") -> bool:
+## mode: "full" = Architect→CodeEngineer→Reviewer; "repair" =
+## CodeEngineer→Reviewer (Architect'siz — hata zaten belli, daha
+## hızlı/ucuz). Sonuç 'chain_completed' ile.
+func run(task: String, model: String = "", mode: String = "full") -> bool:
 	if _running:
 		_finish(false, "Zincir zaten çalışıyor")
 		return false
@@ -80,7 +82,13 @@ func run(task: String, model: String = "") -> bool:
 	_corrected = false
 	_code_accum = ""
 	_chunk = 0
-	_steps = BASE_CHAIN.duplicate()
+	if mode == "repair":
+		_steps = [
+			AICellRoles.Role.CODE_ENGINEER,
+			AICellRoles.Role.REVIEWER,
+		]
+	else:
+		_steps = BASE_CHAIN.duplicate()
 	if not _bridge.thought_completed.is_connected(_on_thought):
 		_bridge.thought_completed.connect(_on_thought)
 	_running = true
