@@ -132,7 +132,14 @@ func think_chat(
 		+ "yararlı yanıtlar ver. Önceki konuşma turlarını dikkate al "
 		+ "(kullanıcı 'az önce' dediğinde geçmişe bak). Kod istenmedikçe "
 		+ "kod bloğu yazma. Yanıta kendi rol tanımını tekrar ederek "
-		+ "başlama."
+		+ "başlama.\n"
+		+ "ÖNEMLİ: Bu asistanın GERÇEK üretim hattı vardır — proje "
+		+ "dosyalarını res://game/ altına yazıp çalışan kod/sahne "
+		+ "ÜRETEBİLİR. ASLA 'yazma yetkim yok / sadece okuyabiliyorum / "
+		+ "elle şöyle yap' deme. Kullanıcı bir şey yapılmasını isterse "
+		+ "kısaca 'üretebilirim' de ve 'oluştur', 'yap' veya 'üret' "
+		+ "yazmasını iste — sistem o komutu otomatik üretim hattına "
+		+ "alır. Adım adım elle tarif YERİNE üretimi öner."
 	))
 	if not project_context.strip_edges().is_empty():
 		request.add_message("system", (

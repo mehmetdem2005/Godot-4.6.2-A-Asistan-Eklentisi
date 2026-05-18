@@ -284,9 +284,45 @@ const CHAT_HINTS: Array = [
 	"ne yapabilirsin", "yardım", "yardim",
 ]
 
+## GÜÇLÜ üretim komutu — TAM sözcük (emir kipi). Bunlar kısa/2-kelimelik
+## olsa da BUILD'dir ("sen oluştur", "oyun yap", "node ekle"). Telefon
+## testi: kısa emirler yanlışlıkla CHAT'e düşüp asistan "yazma yetkim
+## yok" diyordu — bu liste o kör noktayı kapatır.
+const STRONG_BUILD_TOKENS: Array = [
+	"oluştur", "olustur", "üret", "uret", "yap", "yarat", "yaz",
+	"kodla", "inşa", "insa", "ekle", "düzelt", "duzelt", "generate",
+	"implement", "build", "create", "refactor", "make", "write",
+]
+
+## GÜÇLÜ üretim kalıbı — çok sözcüklü (alt-dize eşleşmesi).
+const STRONG_BUILD_PHRASES: Array = [
+	"görev zincir", "gorev zincir", "make me", "make a", "build a",
+	"write a",
+]
+
+
+## Bir metni sözcüklere böler, çevresel noktalamayı temizler.
+func _tokens(t: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for raw in t.replace("\n", " ").replace("\t", " ").split(" ", false):
+		var w: String = str(raw)
+		while w.length() > 0 and w.substr(0, 1) in [
+			"(", "\"", "'", "*", "-", "`",
+		]:
+			w = w.substr(1)
+		while w.length() > 0 and w.right(1) in [
+			".", ",", "?", "!", ")", "(", "'", "\"", ":", ";", "*", "`",
+		]:
+			w = w.left(w.length() - 1)
+		if not w.is_empty():
+			out.append(w)
+	return out
+
 
 ## Mesajın niyetini sezgisel sınıflar. Çevrimdışı, deterministik.
-## Selam/soru → CHAT; üretim sinyali → BUILD.
+## Sıra: selam → açık soru(?) → GÜÇLÜ emir (kısa olsa da BUILD) →
+## zayıf BUILD ipucu → CHAT. Böylece "sen oluştur"/"oyun yap" gibi
+## kısa üretim komutları artık doğru biçimde BUILD'e gider.
 func classify_intent(text: String) -> int:
 	var t: String = text.strip_edges().to_lower()
 	if t.is_empty():
@@ -294,9 +330,18 @@ func classify_intent(text: String) -> int:
 	for g in CHAT_HINTS:
 		if t == str(g).strip_edges() or t.begins_with(str(g)):
 			return Intent.CHAT
-	# Soru ya da çok kısa → sohbet (BUILD kökü olsa bile soru güvenli)
-	if t.ends_with("?") or t.split(" ", false).size() <= 2:
+	# Soru → açıklama beklenir, sohbet (kullanıcı '?'yi atınca üretir).
+	if t.ends_with("?"):
 		return Intent.CHAT
+	# GÜÇLÜ emir: kısa/2-kelime olsa bile üretim (kör nokta düzeltmesi).
+	var toks: PackedStringArray = _tokens(t)
+	for tok in toks:
+		if STRONG_BUILD_TOKENS.has(tok):
+			return Intent.BUILD
+	for ph in STRONG_BUILD_PHRASES:
+		if t.contains(str(ph)):
+			return Intent.BUILD
+	# Zayıf ipucu (nesne adı vb.) — kısa-soru güvenliği artık gerekmiyor.
 	for b in BUILD_HINTS:
 		if t.contains(str(b)):
 			return Intent.BUILD

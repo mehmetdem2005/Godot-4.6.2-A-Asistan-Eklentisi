@@ -21,6 +21,7 @@ static func run_all() -> Array:
 	results.append(_b("Panel: Görev", _test_target_path()))
 	results.append(_b("Panel: Niyet", _test_intent_chat()))
 	results.append(_b("Panel: Niyet", _test_intent_build()))
+	results.append(_b("Panel: Niyet", _test_intent_short_commands()))
 	results.append(_b("Panel: Sekme", _test_nine_tabs()))
 	results.append(_b("Panel: Durum", _test_status_and_result()))
 	results.append(_b("Panel: Model", _test_model_default()))
@@ -178,6 +179,25 @@ static func _test_intent_build() -> Dictionary:
 	for m in build:
 		if c.classify_intent(m) != AIMainPanelController.Intent.BUILD:
 			return _fail(name, "BUILD beklendi: '%s'" % m)
+	return _ok(name)
+
+
+static func _test_intent_short_commands() -> Dictionary:
+	var name := "Kısa emir komutları → BUILD (telefon kör nokta regresyon)"
+	var c := _c()
+	# Ekran görüntülerindeki gerçek başarısız ifadeler + benzerleri.
+	var build: Array = [
+		"sen oluştur", "oyun yap", "görev zinciriyle oluştur",
+		"3d oyun yap", "node ekle", "sen yap", "bunu üret",
+	]
+	for m in build:
+		if c.classify_intent(m) != AIMainPanelController.Intent.BUILD:
+			return _fail(name, "kısa emir BUILD olmalı: '%s'" % m)
+	# Kısa emirler BUILD olurken selam/soru hâlâ CHAT kalmalı.
+	var chat: Array = ["merhaba", "nasılsın?", "bu ne?", "ne yapabilirsin"]
+	for m in chat:
+		if c.classify_intent(m) != AIMainPanelController.Intent.CHAT:
+			return _fail(name, "hâlâ CHAT olmalı: '%s'" % m)
 	return _ok(name)
 
 
