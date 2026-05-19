@@ -240,6 +240,10 @@ static func run_all() -> Dictionary:
 	for scene_act_result in AISceneActionPlannerTest.run_all():
 		results.append(scene_act_result)
 
+	# --- PHASE 37: Otonom Hata Düzeltme (log → router → onarım) ---
+	for auto_err_result in AIAutonomousErrorLoopTest.run_all():
+		results.append(auto_err_result)
+
 	return _build_report(results)
 
 
