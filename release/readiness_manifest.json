@@ -86,7 +86,7 @@
       "branch": "agent/phase-08-release-consolidation",
       "base": "agent/phase-07-android-mobile-hardening",
       "pr": 28,
-      "automatic_complete": false
+      "automatic_complete": true
     }
   ],
   "manual_gates": [
