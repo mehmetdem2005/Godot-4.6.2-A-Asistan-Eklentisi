@@ -367,6 +367,7 @@ static func _test_spawn_from_architect() -> Dictionary:
 	var name := "Architect 'EK DOSYA' satırı dinamik görev doğurur (tekrarsız)"
 	var o := _planned()
 	o._decomposer = AIPlanDecomposer.new()
+	o.add_child(o._decomposer)
 	var res := {
 		"transcript": [
 			{"role": "Architect", "content":
