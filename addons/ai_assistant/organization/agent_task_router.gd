@@ -38,7 +38,8 @@ func route(task: Dictionary) -> AIAgentWorkOrder:
 
 	# Güvenlik invariant'ları routing sonucundan sonra zorlanır.
 	if order.high_risk:
-		_append_unique(order.reviewer_ids, "security_reviewer")
+		if order.primary_role_id != "security_reviewer":
+			_append_unique(order.reviewer_ids, "security_reviewer")
 		if order.escalation_role_id.is_empty():
 			order.escalation_role_id = "technical_director"
 	var selected := _chart.role(order.primary_role_id)
