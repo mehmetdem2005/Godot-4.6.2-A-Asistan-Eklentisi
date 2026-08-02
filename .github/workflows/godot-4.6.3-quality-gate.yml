@@ -116,6 +116,28 @@ jobs:
             --script res://tools/ci_contract_runner.gd \
             2>&1 | tee ci-logs/contract-tests.log
 
+      - name: Runtime hygiene gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="ci-logs/contract-tests.log"
+          forbidden=(
+            "Unable to start the timer because it's not inside the scene tree"
+            "ObjectDB instances leaked at exit"
+            "resources still in use at exit"
+          )
+          failed=0
+          for pattern in "${forbidden[@]}"; do
+            if grep -Fn -- "${pattern}" "${log}"; then
+              echo "Runtime hygiene regression detected: ${pattern}" >&2
+              failed=1
+            fi
+          done
+          if [[ ${failed} -ne 0 ]]; then
+            exit 41
+          fi
+          echo "Runtime hygiene gate passed"
+
       - name: Upload validation logs
         if: always()
         uses: actions/upload-artifact@v4
