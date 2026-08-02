@@ -10,11 +10,14 @@ extends Node
 ## pipeline.run_task() (mevcut LLM hattı). Mevcut HITL/Executor/repair
 ## sayaçları zaten devrede; circuit breaker aynı hatada döngüyü kırar.
 ##
-## DİSİPLİN: bu sınıf İNCE — gerçek hata yakalama (watcher) ve karar
-## (router) saf+test edilmiş. Burası onları zamanlama ile birleştirir;
-## live editor'da kullanıcı göz ile doğrular (devir §5.4).
+## YAŞAM DÖNGÜSÜ SÖZLEŞMESİ:
+## - start(), çalıştırma TALEBİNİ kabul eder; Node henüz SceneTree'de
+##   değilse Timer başlatılmaz ve motor uyarısı üretilmez.
+## - Node ağaca girdiğinde bekleyen talep otomatik etkinleşir.
+## - is_active(), yalnız Timer gerçekten ağaçta ve çalışıyorken true.
+## - stop(), talebi ve çalışma referanslarını tamamen temizler.
 ##
-## Mock policy: pipeline yoksa sessizce uyur; çalışmıyor demez ki
+## Mock policy: pipeline yoksa sessizce uyur; çalışıyor demez ki
 ## kullanıcı şaşırsın — is_active() dürüstçe false döner.
 
 const DEFAULT_LOG_PATH: String = "user://logs/godot.log"
@@ -27,41 +30,69 @@ var _watcher: AIErrorLogWatcher = null
 var _router: AIAutonomousRepairRouter = null
 var _pipeline: AIPipelineOrchestrator = null
 var _timer: Timer = null
+var _start_requested: bool = false
 var _active: bool = false
 var _busy: bool = false
 
 
-## Otonom döngüyü başlatır. p_pipeline gereklidir; yoksa false.
+func _enter_tree() -> void:
+	# Çocuk Timer parent'tan sonra ağaca gireceği için deferred başlat.
+	call_deferred("_activate_timer_if_possible")
+
+
+func _exit_tree() -> void:
+	# Ağaca yeniden eklenirse start talebi korunur; yalnız gerçek çalışma
+	# durdurulur. queue_free sırasında da Timer canlı kalmaz.
+	_active = false
+	if _timer != null and _timer.is_inside_tree():
+		_timer.stop()
+
+
+## Otonom döngüyü başlatmayı talep eder. p_pipeline gereklidir;
+## yoksa false. Node henüz SceneTree'de değilse talep bekletilir.
 func start(
 	p_pipeline: AIPipelineOrchestrator,
 	p_log_path: String = DEFAULT_LOG_PATH
 ) -> bool:
 	if p_pipeline == null:
 		return false
+
 	_pipeline = p_pipeline
 	_watcher = AIErrorLogWatcher.new(p_log_path)
 	_router = AIAutonomousRepairRouter.new()
-	if _timer == null:
-		_timer = Timer.new()
-		_timer.wait_time = TICK_SECONDS
-		_timer.one_shot = false
-		_timer.autostart = false
-		add_child(_timer)
-		_timer.timeout.connect(_tick)
-	_timer.start()
-	_active = true
+	_busy = false
+	_start_requested = true
+	_ensure_timer()
+	_activate_timer_if_possible()
 	return true
 
 
-## Döngüyü durdurur ve kaynakları serbest bırakır.
+## Döngüyü durdurur ve çalışma referanslarını serbest bırakır.
 func stop() -> void:
+	_start_requested = false
 	_active = false
+	_busy = false
 	if _timer != null and _timer.is_inside_tree():
 		_timer.stop()
+	_watcher = null
+	_router = null
+	_pipeline = null
 
 
+## Yalnız Timer gerçekten SceneTree'de ve çalışıyorsa true.
 func is_active() -> bool:
-	return _active
+	return (
+		_active
+		and _timer != null
+		and _timer.is_inside_tree()
+		and not _timer.is_stopped()
+	)
+
+
+## Test/telemetri için: start kabul edildi fakat Node henüz ağaçta
+## olmadığı için bekliyor olabilir.
+func is_start_requested() -> bool:
+	return _start_requested
 
 
 ## Tek bir polling adımı (testler ve manuel tetikleme için public).
@@ -73,9 +104,33 @@ func tick() -> Array:
 # DAHİLİ
 # ============================================================
 
+func _ensure_timer() -> void:
+	if _timer != null:
+		return
+	_timer = Timer.new()
+	_timer.name = "AutoFixTimer"
+	_timer.wait_time = TICK_SECONDS
+	_timer.one_shot = false
+	_timer.autostart = false
+	add_child(_timer)
+	_timer.timeout.connect(_tick)
+
+
+func _activate_timer_if_possible() -> void:
+	if not _start_requested or _pipeline == null:
+		_active = false
+		return
+	if _timer == null or not is_inside_tree() or not _timer.is_inside_tree():
+		_active = false
+		return
+	if _timer.is_stopped():
+		_timer.start()
+	_active = not _timer.is_stopped()
+
+
 func _tick() -> Array:
 	var triggered: Array = []
-	if not _active or _watcher == null or _router == null or _pipeline == null:
+	if not is_active() or _watcher == null or _router == null or _pipeline == null:
 		return triggered
 	if _busy:
 		# Bir önceki onarım sürüyor — üst üste binme.
