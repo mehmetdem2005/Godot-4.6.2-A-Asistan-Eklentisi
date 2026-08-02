@@ -27,8 +27,18 @@ extends RefCounted
 
 const PROVIDER: String = "deepseek"
 
-## Kullanıcının seçebileceği DeepSeek modelleri (Ayarlar görünümü).
-const ALLOWED_MODELS: Array = ["deepseek-chat", "deepseek-reasoner"]
+## Kullanıcıya gösterilen üretim profilleri. Legacy model kimlikleri yalnız
+## eski kayıtları okumak için kabul edilir; arayüzde gösterilmez.
+const MODEL_PRO_MAX_LABEL: String = "DeepSeek V4 Pro — MAX"
+const MODEL_OPTIONS: Array = [
+	{
+		"id": AIDeepSeekModelPolicy.MODEL_PRO,
+		"label": MODEL_PRO_MAX_LABEL,
+		"profile": "max",
+		"thinking": "maximum",
+	},
+]
+const ALLOWED_MODELS: Array = [AIDeepSeekModelPolicy.MODEL_PRO]
 
 var settings: AISettingsModel = null
 var state: AIWorkspaceState = null
@@ -37,7 +47,7 @@ var sync_queue: AIOfflineSyncQueue = null
 var _key_store: AIAPIKeyStore = null
 var _status: String = "Hazır"
 var _last_result: Dictionary = {}
-var _model: String = "deepseek-chat"
+var _model: String = AIDeepSeekModelPolicy.MODEL_PRO
 var _feed: AIFeedEmitter = null
 var _feed_model: AILiveFeedModel = null
 
@@ -104,17 +114,34 @@ func set_live_mode(value: bool) -> void:
 	settings.set_live_mode(value)
 
 
-## Yapay zeka modelini ayarlar. İzinli liste dışı → reddedilir (false).
+## Arayüzde gösterilecek kanonik model seçenekleri.
+func model_options() -> Array:
+	return MODEL_OPTIONS.duplicate(true)
+
+
+## Yapay zeka modelini ayarlar. Legacy DeepSeek kimlikleri eski kayıtlar
+## için V4 Pro'ya normalize edilir; bilinmeyen sağlayıcı/model reddedilir.
 func set_model(model_id: String) -> bool:
-	if not ALLOWED_MODELS.has(model_id):
+	var requested: String = model_id.strip_edges()
+	if AIDeepSeekModelPolicy.LEGACY_MODELS.has(requested):
+		requested = AIDeepSeekModelPolicy.canonical_model(requested)
+	if not ALLOWED_MODELS.has(requested):
 		push_warning("MainPanelController: geçersiz model %s" % model_id)
 		return false
-	_model = model_id
+	_model = requested
 	return true
 
 
-## Seçili model adı.
+## Seçili kanonik model kimliği.
 func model_name() -> String:
+	return _model
+
+
+## Seçili modelin kullanıcıya gösterilecek adı.
+func model_display_name() -> String:
+	for option in MODEL_OPTIONS:
+		if str(option.get("id", "")) == _model:
+			return str(option.get("label", _model))
 	return _model
 
 
@@ -441,4 +468,5 @@ func summary() -> Dictionary:
 		"active_tab": active_tab_name(),
 		"automation": settings.automation_name(),
 		"model": _model,
+		"model_label": model_display_name(),
 	}

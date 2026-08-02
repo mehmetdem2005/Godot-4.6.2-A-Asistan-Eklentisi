@@ -2,8 +2,8 @@
 class_name AIAdaptiveDeepDeliberationTest
 extends RefCounted
 
-## Faz 12 — 21 katman potansiyelli paralel/adaptif düşünme grafiği
-## için 40 deterministik test. Ağ çağrısı veya dosya mutasyonu yapmaz.
+## Faz 12–13 — adaptif düşünme grafiği ile tek ekran canlı ajan ve
+## gerçek Godot artefakt sözleşmeleri için 52 deterministik test.
 
 
 static func run_all() -> Array:
@@ -13,6 +13,7 @@ static func run_all() -> Array:
 	results.append_array(_execution_and_deepening_tests())
 	results.append_array(_consensus_tests())
 	results.append_array(_runner_contract_tests())
+	results.append_array(AIPhase13LiveWorkspaceTest.run_all())
 	return results
 
 

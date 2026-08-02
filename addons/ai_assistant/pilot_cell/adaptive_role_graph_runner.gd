@@ -9,6 +9,8 @@ extends Node
 signal chain_progress(step: String)
 signal chain_completed(result: Dictionary)
 signal graph_updated(snapshot: Dictionary)
+## UI'ya güvenli, başlıklı ve bounded canlı ajan olayları taşır.
+signal agent_event(event: Dictionary)
 
 const MAX_WORKERS: int = 6
 const MAX_MODEL: String = "deepseek-v4-pro"
@@ -36,8 +38,6 @@ func _init() -> void:
 	_graph = AIAdaptiveDeliberationGraph.new(_policy)
 
 
-## Eski API ile uyumlu: verilen bridge'in yalnız router'ı paylaşılır.
-## Her paralel worker ayrı bridge/transport kullanır.
 func attach_bridge(bridge: AIAgentLiveBridge) -> void:
 	_router = null if bridge == null else bridge.router()
 	_rebuild_workers()
@@ -152,6 +152,14 @@ func _dispatch_node(current: AIDeliberationNode, worker_index: int) -> void:
 		"[Katman %d] %s — %s paralel düşünüyor"
 		% [current.layer_index + 1, AICellRoles.role_name(current.role), current.title]
 	)
+	_emit_agent_event(
+		AILiveAgentEvent.TYPE_STARTED,
+		current,
+		worker_index,
+		"Çalışma başladı. " + current.prompt,
+		0.0,
+		{"model": MAX_MODEL, "state": "running"}
+	)
 	var started: bool = worker.think_live(
 		current.role,
 		prompt,
@@ -161,6 +169,13 @@ func _dispatch_node(current: AIDeliberationNode, worker_index: int) -> void:
 	if not started:
 		_worker_node_ids.erase(worker_index)
 		_graph.mark_failed(current.node_id, "Canlı düşünme başlatılamadı")
+		_emit_agent_event(
+			AILiveAgentEvent.TYPE_FAILED,
+			current,
+			worker_index,
+			"Canlı düşünme başlatılamadı",
+			0.0
+		)
 
 
 func _on_worker_completed(result: Dictionary, worker_index: int) -> void:
@@ -188,6 +203,19 @@ func _on_worker_completed(result: Dictionary, worker_index: int) -> void:
 			"input_tokens": int(result.get("input_tokens", 0)),
 			"output_tokens": int(result.get("output_tokens", 0)),
 		})
+		_emit_agent_event(
+			AILiveAgentEvent.TYPE_COMPLETED,
+			current,
+			worker_index,
+			content,
+			confidence,
+			{
+				"latency_ms": int(result.get("latency_ms", 0)),
+				"input_tokens": int(result.get("input_tokens", 0)),
+				"output_tokens": int(result.get("output_tokens", 0)),
+				"model": str(result.get("model", MAX_MODEL)),
+			}
+		)
 	else:
 		var reason: String = str(result.get("status_note", "Ajan düşünmesi başarısız"))
 		_graph.mark_failed(node_id, reason)
@@ -197,6 +225,14 @@ func _on_worker_completed(result: Dictionary, worker_index: int) -> void:
 			"role": AICellRoles.role_name(current.role),
 			"error": reason,
 		})
+		_emit_agent_event(
+			AILiveAgentEvent.TYPE_FAILED,
+			current,
+			worker_index,
+			reason,
+			0.0,
+			{"http_status": int(result.get("http_status", 0))}
+		)
 	chain_progress.emit(
 		"[Katman %d] %s tamamlandı — güven %.2f"
 		% [current.layer_index + 1, current.title, current.confidence]
@@ -211,6 +247,13 @@ func _on_worker_progress(step: String, worker_index: int) -> void:
 	var current := _graph.node(str(_worker_node_ids[worker_index]))
 	if current != null:
 		chain_progress.emit("[%s] %s" % [current.title, step])
+		_emit_agent_event(
+			AILiveAgentEvent.TYPE_PROGRESS,
+			current,
+			worker_index,
+			step,
+			current.confidence
+		)
 
 
 func _evaluate_finished_wave() -> void:
@@ -277,10 +320,34 @@ func _finish(ok: bool, note: String, consensus_report: Dictionary) -> void:
 		"graph_metrics": metrics,
 		"consensus": consensus_report.duplicate(true),
 		"parallel_peak": _parallel_peak,
-		"cognitive_depth": (
-			13 + int(metrics.get("deepen_rounds", 0)) * 4
-		),
+		"cognitive_depth": 13 + int(metrics.get("deepen_rounds", 0)) * 4,
 	})
+
+
+func _emit_agent_event(
+	event_type: String,
+	current: AIDeliberationNode,
+	worker_index: int,
+	text: String,
+	confidence: float,
+	metadata: Dictionary = {}
+) -> void:
+	if current == null:
+		return
+	var event: Dictionary = AILiveAgentEvent.create(
+		event_type,
+		current.node_id,
+		current.layer_index + 1,
+		AICellRoles.role_name(current.role),
+		current.title,
+		text,
+		confidence,
+		worker_index,
+		metadata
+	)
+	var validation: Dictionary = AILiveAgentEvent.validate(event)
+	if bool(validation.get("ok", false)):
+		agent_event.emit(event)
 
 
 func _emit_graph() -> void:
