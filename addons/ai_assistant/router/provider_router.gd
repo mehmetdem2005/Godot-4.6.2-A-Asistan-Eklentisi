@@ -13,34 +13,18 @@ extends RefCounted
 ##   - FallbackChain   — sağlayıcı çökerse sıradakine
 ##   - HTTPTransport   — gerçek ağ çağrısı (dışarıdan enjekte edilir)
 ##
-## İstek akışı:
-##   1. Cache'e bak  -> varsa cache yanıtı dön (maliyet 0)
-##   2. Mode'a göre sağlayıcı sırası belirle
-##   3. Adapter ile istek gövdesini hazırla
-##   4. HTTPTransport ile gönder (veya dry-run)
-##   5. Yanıtı adapter ile çöz
-##   6. Hata + fallback gerekiyorsa -> sıradaki sağlayıcı
-##   7. Başarılı yanıtı cache'e yaz
-##
-## ÖNEMLİ: HTTPTransport bir Node — bu RefCounted sınıf onu DIŞARIDAN
-## alır (attach_transport). Transport yoksa router dry-run benzeri
-## davranır: isteği hazırlar, "transport yok" hatası döner. Sahte
-## başarı YOK.
+## PRO_MAX üretim profili:
+##   DeepSeek'e giden her canlı istek ağdan önce deepseek-v4-pro,
+##   thinking=enabled, reasoning_effort=max ve mümkün olan en yüksek
+##   güvenli çıktı bütçesine normalize edilir. Eski/Flash ayarları canlı
+##   trafiğin kalitesini düşüremez.
 
-## Bileşenler.
 var mode: AIModeController
 var cache: AIPromptCache
 var fallback: AIFallbackChain
 
-## Sağlayıcı adapter'ları — provider enum -> adapter.
 var _adapters: Dictionary = {}
-
-## API anahtarları — provider enum -> key string.
-## Router anahtarı kalıcı saklamaz; çalışma süresince tutar.
-## Anahtar yönetimi ayrı bir güvenlik katmanının işi.
 var _api_keys: Dictionary = {}
-
-## HTTP taşıma katmanı — Node, dışarıdan enjekte edilir.
 var _transport: AIHTTPTransport = null
 
 
@@ -51,10 +35,7 @@ func _init() -> void:
 	_register_adapters()
 
 
-## 4 sağlayıcı adapter'ını kaydeder.
 func _register_adapters() -> void:
-	# Canlı DeepSeek trafiği yalnız V4 adapter üzerinden çıkar. Eski
-	# AIDeepSeekAdapter sınıfı geriye uyumlu contract yüzeyi olarak kalır.
 	var deepseek := AIDeepSeekV4Adapter.new()
 	var openai := AIOpenAIAdapter.new()
 	var anthropic := AIAnthropicAdapter.new()
@@ -69,54 +50,68 @@ func _register_adapters() -> void:
 # YAPILANDIRMA
 # ============================================================
 
-## HTTP taşıma node'unu bağlar — gerçek ağ çağrısı için.
-## Bir sahne/autoload AIHTTPTransport'u ağaca ekler, sonra buraya verir.
 func attach_transport(transport: AIHTTPTransport) -> void:
 	_transport = transport
 
 
-## Bir sağlayıcı için API anahtarı ayarlar.
-## provider: AIProviderRequest.Provider enum. key: anahtar.
 func set_api_key(provider: int, key: String) -> void:
-	_api_keys[provider] = key
+	_api_keys[provider] = key.strip_edges()
 
 
-## Bir sağlayıcının anahtarı ayarlanmış mı?
 func has_api_key(provider: int) -> bool:
 	return _api_keys.has(provider) and not str(_api_keys[provider]).is_empty()
 
 
-## Bir sağlayıcının adapter'ını döndürür. Yoksa null.
 func get_adapter(provider: int) -> AIProviderAdapterBase:
 	return _adapters.get(provider, null)
 
 
 # ============================================================
-# İSTEK HAZIRLAMA — sağlayıcıya göndermeden önce
+# İSTEK HAZIRLAMA
 # ============================================================
 
-## Bir isteği moda göre ayarlar — token, sıcaklık, sağlayıcı.
-## request üzerinde DEĞİŞİKLİK YAPAR (mod parametrelerini uygular).
 func _apply_mode(request: AIProviderRequest) -> void:
 	request.max_tokens = mode.resolve_max_tokens(request.max_tokens)
 	request.temperature = mode.resolve_temperature(request.temperature)
-	# Sağlayıcı belirtilmemişse mod tercih etsin
-	# (request.provider zaten bir değer taşır; mod SINGLE ise zorla DeepSeek)
 	if mode.is_single_provider():
 		request.provider = AIProviderRequest.Provider.DEEPSEEK
+	if request.provider == AIProviderRequest.Provider.DEEPSEEK:
+		_apply_deepseek_pro_max_profile(request)
 
 
-## Bu istek için fallback zincirini moda göre kurar.
-## Birincil: isteğin/mod'un tercihi. Yedekler: izinli diğer sağlayıcılar.
+## DeepSeek canlı isteklerini tek üretim profiline sabitler.
+func _apply_deepseek_pro_max_profile(request: AIProviderRequest) -> void:
+	request.provider = AIProviderRequest.Provider.DEEPSEEK
+	request.model = AIDeepSeekModelPolicy.production_model(request.model)
+	if request.estimated_input_tokens <= 0:
+		request.estimated_input_tokens = _estimate_input_tokens(request)
+	request.max_tokens = AIDeepSeekModelPolicy.max_output_for_context(
+		request.estimated_input_tokens
+	)
+
+
+## Harici tokenizer gerektirmeyen, bağlam taşmasını önlemeye yönelik
+## muhafazakâr tahmin. Türkçe/kod karışımı için yaklaşık 3 karakter/token
+## ve mesaj başına protokol payı kullanılır.
+func _estimate_input_tokens(request: AIProviderRequest) -> int:
+	var chars: int = request.system_prompt.length()
+	var message_count: int = 0
+	for message in request.messages:
+		if typeof(message) != TYPE_DICTIONARY:
+			continue
+		message_count += 1
+		chars += str(message.get("role", "")).length()
+		chars += str(message.get("content", "")).length()
+	return maxi(1, int(ceil(float(chars) / 3.0)) + message_count * 16 + 128)
+
+
 func _build_fallback_chain(request: AIProviderRequest) -> void:
 	var allowed: Array = mode.allowed_providers()
-	# Birincil sağlayıcı — isteğinki (izinliyse), değilse mod tercihi
 	var primary: int = request.provider
 	if not allowed.has(primary):
 		primary = mode.preferred_provider(request.purpose)
 
 	var chain: Array = [primary]
-	# Kalan izinli sağlayıcılar yedek olarak eklenir
 	for p in allowed:
 		if p != primary and not chain.has(p):
 			chain.append(p)
@@ -127,24 +122,9 @@ func _build_fallback_chain(request: AIProviderRequest) -> void:
 # ANA YÖNLENDİRME
 # ============================================================
 
-## Bir isteği yönlendirir ve yanıt döndürür.
-##
-## NOT: Gerçek HTTP çağrısı asenkrondur (HTTPTransport sinyal-tabanlı).
-## Bu metod SENKRON karar mantığını yapar: cache, mod, hazırlık. Gerçek
-## ağ adımı için route_async kullanılır. Bu metod cache hit'i veya
-## hazırlık hatalarını hemen döndürebilir.
-##
-## Dönen: {
-##   resolved: bool,        cache'ten/hatadan hemen sonuç var mı
-##   response: AIProviderResponse veya null,
-##   needs_network: bool,   ağ çağrısı gerekiyor mu (route_async'e geç)
-##   prepared: Dictionary,  ağ çağrısı için hazırlanmış {url, headers, body, provider}
-## }
 func route(request: AIProviderRequest) -> Dictionary:
-	# --- 1. Mod uygula ---
 	_apply_mode(request)
 
-	# --- 2. Cache kontrolü ---
 	if mode.should_use_cache():
 		var cached: AIProviderResponse = cache.lookup(request)
 		if cached != null:
@@ -156,13 +136,10 @@ func route(request: AIProviderRequest) -> Dictionary:
 				"prepared": {},
 			}
 
-	# --- 3. Fallback zinciri kur ---
 	_build_fallback_chain(request)
 
-	# --- 4. İlk sağlayıcıyı hazırla ---
 	var prep: Dictionary = _prepare_for_provider(request, fallback.current())
 	if not prep["ok"]:
-		# Hazırlık hatası — sahte başarı yok, açık hata
 		return {
 			"resolved": true,
 			"response": AIProviderResponse.create_failure(prep["error"]),
@@ -170,7 +147,6 @@ func route(request: AIProviderRequest) -> Dictionary:
 			"prepared": {},
 		}
 
-	# --- 5. Ağ çağrısı gerekiyor ---
 	return {
 		"resolved": false,
 		"response": null,
@@ -179,8 +155,6 @@ func route(request: AIProviderRequest) -> Dictionary:
 	}
 
 
-## Belirli bir sağlayıcı için ağ çağrısı malzemesini hazırlar.
-## Dönen: {ok, error, url, headers, body, provider, adapter}
 func _prepare_for_provider(request: AIProviderRequest, provider: int) -> Dictionary:
 	if provider < 0:
 		return {"ok": false, "error": "Fallback zinciri tükendi — sağlayıcı yok"}
@@ -189,7 +163,16 @@ func _prepare_for_provider(request: AIProviderRequest, provider: int) -> Diction
 	if adapter == null:
 		return {"ok": false, "error": "Sağlayıcı adapter'ı bulunamadı"}
 
-	# API anahtarı kontrolü — yoksa açıkça söyle (sahte başarı yok)
+	if provider == AIProviderRequest.Provider.DEEPSEEK:
+		_apply_deepseek_pro_max_profile(request)
+		if request.max_tokens <= 0:
+			return {
+				"ok": false,
+				"error": (
+					"DeepSeek 1M bağlam bütçesi tükendi; girdi kısaltılmalı"
+				),
+			}
+
 	if not has_api_key(provider):
 		return {
 			"ok": false,
@@ -200,7 +183,6 @@ func _prepare_for_provider(request: AIProviderRequest, provider: int) -> Diction
 	var body: Dictionary = adapter.build_request_body(request)
 	var headers: PackedStringArray = adapter.build_headers(api_key)
 
-	# Gemini özel: endpoint URL'si model + anahtar içerir
 	var url: String = adapter.endpoint_url
 	if adapter is AIGeminiAdapter:
 		url = (adapter as AIGeminiAdapter).build_endpoint_url(request, api_key)
@@ -216,10 +198,6 @@ func _prepare_for_provider(request: AIProviderRequest, provider: int) -> Diction
 	}
 
 
-## Bir HTTP yanıtını işler — adapter ile çözer, cache'e yazar.
-## raw_result: HTTPTransport callback'inin verdiği {ok, status, json...}.
-## request: orijinal istek. provider: hangi sağlayıcı yanıtladı.
-## Dönen: {response: AIProviderResponse, should_fallback: bool}
 func handle_response(
 	raw_result: Dictionary, request: AIProviderRequest, provider: int
 ) -> Dictionary:
@@ -236,17 +214,13 @@ func handle_response(
 	response.request_ref = request.id
 	response.latency_ms = int(raw_result.get("latency_ms", 0))
 
-	# Başarılıysa cache'e yaz
 	if response.is_usable() and mode.should_use_cache():
 		cache.store(request, response)
 
-	# Fallback gerekli mi
 	var needs_fallback: bool = AIFallbackChain.should_fallback(response)
 	return {"response": response, "should_fallback": needs_fallback}
 
 
-## Fallback sonrası sıradaki sağlayıcıyı hazırlar.
-## Dönen: route() ile aynı yapı.
 func route_next(request: AIProviderRequest) -> Dictionary:
 	var next_provider: int = fallback.advance()
 	if next_provider < 0:
@@ -260,7 +234,6 @@ func route_next(request: AIProviderRequest) -> Dictionary:
 		}
 	var prep: Dictionary = _prepare_for_provider(request, next_provider)
 	if not prep["ok"]:
-		# Bu sağlayıcı hazırlanamadı — bir sonrakini dene
 		if fallback.has_next():
 			return route_next(request)
 		return {
@@ -281,7 +254,6 @@ func route_next(request: AIProviderRequest) -> Dictionary:
 # DURUM
 # ============================================================
 
-## Router durum özeti.
 func status() -> Dictionary:
 	var keyed: Array = []
 	for p in _api_keys:
@@ -294,4 +266,11 @@ func status() -> Dictionary:
 		"providers_with_keys": keyed,
 		"transport_attached": _transport != null,
 		"transport_live": _transport != null and _transport.live_mode,
+		"deepseek_profile": {
+			"model": AIDeepSeekModelPolicy.PRODUCTION_MODEL,
+			"thinking": "enabled",
+			"reasoning_effort": "max",
+			"max_output_tokens": AIDeepSeekModelPolicy.MAX_OUTPUT_TOKENS,
+			"context_tokens": AIDeepSeekModelPolicy.MAX_CONTEXT_TOKENS,
+		},
 	}
