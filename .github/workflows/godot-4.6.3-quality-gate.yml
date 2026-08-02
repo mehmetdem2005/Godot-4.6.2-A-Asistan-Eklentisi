@@ -36,10 +36,10 @@ jobs:
         run: python3 tools/ci_architecture_gate.py
 
   godot-validation:
-    name: Godot 4.6.3 parse and contract tests
+    name: Godot 4.6.3 parse, editor smoke and contract tests
     needs: static-gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -106,6 +106,40 @@ jobs:
             ci-logs/editor-import.log; then
             echo "Parse/compile diagnostics detected during editor import" >&2
             exit 40
+          fi
+
+      - name: Run real EditorUndoRedo smoke
+        shell: bash
+        env:
+          AI_EDITOR_SMOKE: "1"
+        run: |
+          set -euo pipefail
+          set +e
+          timeout 120s godot --headless --editor --path . --quit-after 300 --verbose \
+            2>&1 | tee ci-logs/editor-undo-redo-smoke.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "EditorUndoRedo smoke process failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+          grep -Fq "SMOKE_OK: 3/3 smoke testi geçti" \
+            ci-logs/editor-undo-redo-smoke.log
+          if grep -Fq "SMOKE_FAIL:" ci-logs/editor-undo-redo-smoke.log; then
+            echo "EditorUndoRedo smoke failure marker detected" >&2
+            exit 42
+          fi
+          echo "EditorUndoRedo smoke gate passed"
+
+      - name: Verify fixture remains clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- tools/editor_smoke/fixture.tscn
+          if grep -Fq 'AddedByAI' tools/editor_smoke/fixture.tscn; then
+            echo "Smoke fixture contains AddedByAI after cleanup" >&2
+            exit 43
           fi
 
       - name: Run complete contract self-test suite
