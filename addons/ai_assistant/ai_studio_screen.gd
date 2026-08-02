@@ -51,6 +51,8 @@ var _settings_panel: VBoxContainer = null
 var _key_grid: GridContainer = null
 var _key_edit: LineEdit = null
 var _key_save_btn: Button = null
+var _model_picker: OptionButton = null
+var _model_detail_label: Label = null
 var _reset_btn: Button = null
 var _chat_log: RichTextLabel = null
 var _input_edit: TextEdit = null
@@ -166,10 +168,25 @@ func _build_settings_panel() -> VBoxContainer:
 	_key_grid.add_child(_key_save_btn)
 
 	var model_label := Label.new()
-	model_label.text = "Üretim modeli: DeepSeek V4 Pro Max · düşünme: maksimum"
-	model_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	model_label.add_theme_font_size_override("font_size", 12)
+	model_label.text = "Model ve çalışma profili"
+	model_label.add_theme_font_size_override("font_size", 13)
 	panel.add_child(model_label)
+
+	_model_picker = OptionButton.new()
+	_model_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for option in _ctrl.model_options():
+		var item_index: int = _model_picker.item_count
+		_model_picker.add_item(str(option.get("label", option.get("id", "Model"))))
+		_model_picker.set_item_metadata(item_index, str(option.get("id", "")))
+	_model_picker.item_selected.connect(_on_model_selected)
+	panel.add_child(_model_picker)
+	_sync_model_picker()
+
+	_model_detail_label = Label.new()
+	_model_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_model_detail_label.add_theme_font_size_override("font_size", 12)
+	panel.add_child(_model_detail_label)
+	_update_model_detail()
 
 	_reset_btn = Button.new()
 	_reset_btn.text = "Çalışma hafızasını ve kuyruğu sıfırla"
@@ -215,6 +232,7 @@ func _apply_responsive_layout() -> void:
 	_settings_toggle.custom_minimum_size = Vector2(92, touch)
 	_key_edit.custom_minimum_size = Vector2(0, touch)
 	_key_save_btn.custom_minimum_size = Vector2(0, touch)
+	_model_picker.custom_minimum_size = Vector2(0, touch)
 	_reset_btn.custom_minimum_size = Vector2(0, touch)
 	_send_btn.custom_minimum_size = Vector2(0, touch)
 	_chat_log.custom_minimum_size = Vector2(
@@ -584,8 +602,8 @@ func _refresh_status() -> void:
 		return
 	var summary: Dictionary = _ctrl.summary()
 	var has_key: bool = bool(summary.get("has_key", false))
-	var model: String = AIDeepSeekModelPolicy.canonical_model(
-		str(summary.get("model", ""))
+	var model_label: String = str(
+		summary.get("model_label", _ctrl.model_display_name())
 	)
 	var state: String = (
 		"ÇALIŞIYOR"
@@ -594,13 +612,41 @@ func _refresh_status() -> void:
 	)
 	_status_label.text = "● %s  ·  Model: %s  ·  %s" % [
 		state,
-		model,
+		model_label,
 		("anahtar var" if has_key else "⚙ Ayarlar'dan anahtar gir"),
 	]
+	_sync_model_picker()
+	_update_model_detail()
 
 
-func _on_model_selected(_index: int) -> void:
-	# Faz 13'te üretim profili düşürülemez: V4 Pro Max sabittir.
+func _sync_model_picker() -> void:
+	if _model_picker == null:
+		return
+	var selected_model: String = _ctrl.model_name()
+	for index in _model_picker.item_count:
+		if str(_model_picker.get_item_metadata(index)) == selected_model:
+			_model_picker.select(index)
+			return
+
+
+func _update_model_detail() -> void:
+	if _model_detail_label == null:
+		return
+	_model_detail_label.text = (
+		"Kimlik: %s · Profil: MAX · Düşünme: maksimum" % _ctrl.model_name()
+	)
+
+
+func _on_model_selected(index: int) -> void:
+	if _model_picker == null or index < 0 or index >= _model_picker.item_count:
+		return
+	var model_id: String = str(_model_picker.get_item_metadata(index))
+	if not _ctrl.set_model(model_id):
+		_append_message("system", "⚠ Model seçimi reddedildi: " + model_id)
+		_sync_model_picker()
+		return
+	_update_model_detail()
+	_append_message("system", "✓ Model seçildi: " + _ctrl.model_display_name())
 	_refresh_status()
 
 
