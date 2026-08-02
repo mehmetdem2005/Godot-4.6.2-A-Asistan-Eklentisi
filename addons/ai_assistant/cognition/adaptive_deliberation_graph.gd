@@ -2,7 +2,7 @@
 class_name AIAdaptiveDeliberationGraph
 extends RefCounted
 
-## 13 katmanlı, bağımlılık tabanlı ve çalışma sırasında derinleşebilen
+## 13 temel + iki meta turla 21 katmana derinleşebilen, bağımlılık tabanlı
 ## düşünme DAG'ı. Global sıra yoktur; yalnız gerçek dependency'ler beklenir.
 
 var policy: AIAdaptiveReasoningPolicy = null
@@ -414,47 +414,63 @@ func append_deepening_round(reason: String) -> Dictionary:
 		return {"ok": false, "reason": "düğüm bütçesi"}
 	_deepen_round += 1
 	var round: int = _deepen_round
+	var base_layer: int = 13 + (round - 1) * 4
 	var previous_final: String = _final_node_id
 	var probe_ids: Array = []
 	probe_ids.append(_add(
-		8, "deep_skeptic_%d" % round, "meta_skeptic", AICellRoles.Role.REVIEWER,
+		base_layer,
+		"deep_skeptic_%d" % round,
+		"meta_skeptic",
+		AICellRoles.Role.REVIEWER,
 		"Derin skeptic turu %d" % round,
-		"Önceki nihai çözümün yanlış olabileceğini varsay. En güçlü karşı kanıtı ve kaçırılan varsayımları bul. Derinleşme nedeni: " + reason,
+		"Önceki nihai çözümün yanlış olabileceğini varsay. En güçlü karşı kanıtı, model hatasını ve kaçırılan varsayımları bul. Derinleşme nedeni: " + reason,
 		[previous_final]
 	).node_id)
 	probe_ids.append(_add(
-		8, "deep_alternative_%d" % round, "meta_alternative", AICellRoles.Role.ARCHITECT,
-		"Alternatif mimari turu %d" % round,
-		"Önceki çözümden yapısal olarak farklı, daha güvenli bir alternatif üret ve hangi kanıtla üstün olduğunu açıkla.",
+		base_layer,
+		"deep_alternative_%d" % round,
+		"meta_alternative",
+		AICellRoles.Role.ARCHITECT,
+		"Alternatif paradigma turu %d" % round,
+		"Önceki çözümden yapısal olarak farklı, daha güvenli bir paradigma üret ve hangi kanıtla üstün olduğunu açıkla.",
 		[previous_final]
 	).node_id)
 	probe_ids.append(_add(
-		9, "deep_test_%d" % round, "meta_test", AICellRoles.Role.TEST_ENGINEER,
+		base_layer,
+		"deep_test_%d" % round,
+		"meta_test",
+		AICellRoles.Role.TEST_ENGINEER,
 		"Derin test turu %d" % round,
 		"Önceki çözümü çürütecek property-based, concurrency ve failure-injection senaryoları üret.",
 		[previous_final]
 	).node_id)
 	var synth := _add(
-		10, "deep_synthesis_%d" % round, "meta_synthesis", AICellRoles.Role.ARCHITECT,
-		"Derin yeniden sentez %d" % round,
-		"Skeptic, alternatif ve test kanıtlarını birleştirerek önceki çözümden daha güçlü bir karar üret.",
+		base_layer + 1,
+		"deep_synthesis_%d" % round,
+		"meta_synthesis",
+		AICellRoles.Role.ARCHITECT,
+		"Paradigma-üstü yeniden sentez %d" % round,
+		"Skeptic, alternatif ve test kanıtlarını birleştirerek önceki çözümden daha güçlü ve gerekçeli bir karar üret.",
 		probe_ids
 	)
 	var revised := _add(
-		11, "deep_final_%d" % round, "final_generation", AICellRoles.Role.CODE_ENGINEER,
+		base_layer + 2,
+		"deep_final_%d" % round,
+		"final_generation",
+		AICellRoles.Role.CODE_ENGINEER,
 		"Derinleştirilmiş nihai artefakt %d" % round,
 		"Yeniden senteze göre nihai artefaktı baştan değerlendir ve tam, uygulanabilir çıktıyı üret.",
 		[synth.node_id, previous_final]
 	)
 	_final_node_id = revised.node_id
-	for index in 3:
-		var roles: Array[int] = [
-			AICellRoles.Role.REVIEWER,
-			AICellRoles.Role.TEST_ENGINEER,
-			AICellRoles.Role.QA_ENGINEER,
-		]
+	var roles: Array[int] = [
+		AICellRoles.Role.REVIEWER,
+		AICellRoles.Role.TEST_ENGINEER,
+		AICellRoles.Role.QA_ENGINEER,
+	]
+	for index in roles.size():
 		_add(
-			12,
+			base_layer + 3,
 			"deep_verify_%d_%d" % [round, index + 1],
 			"final_verification",
 			roles[index],
@@ -462,7 +478,12 @@ func append_deepening_round(reason: String) -> Dictionary:
 			"Revize artefaktı bağımsız doğrula. PASS/FAIL, kanıt ve kalan riskleri ver.",
 			[revised.node_id]
 		)
-	return {"ok": true, "round": round, "final_node_id": revised.node_id}
+	return {
+		"ok": true,
+		"round": round,
+		"depth": 13 + round * 4,
+		"final_node_id": revised.node_id,
+	}
 
 
 func metrics() -> Dictionary:
@@ -472,7 +493,7 @@ func metrics() -> Dictionary:
 		states[state] = int(states.get(state, 0)) + 1
 	return {
 		"nodes": _nodes.size(),
-		"depth": 13,
+		"depth": 13 + _deepen_round * 4,
 		"deepen_rounds": _deepen_round,
 		"peak_parallel_ready": _peak_parallel_ready,
 		"average_confidence": average_confidence(),
