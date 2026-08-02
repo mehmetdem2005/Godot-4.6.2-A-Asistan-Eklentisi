@@ -2,9 +2,6 @@ name: DeepSeek V4 Pro Max Live Gate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "agent/phase-08-release-consolidation"
 
 permissions:
   contents: read
