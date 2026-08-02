@@ -12,7 +12,7 @@
     "rollback_ref": "d9565c48f756420f2fd93e2aad773cf23d530d81"
   },
   "automatic": {
-    "expected_test_count": 926,
+    "expected_test_count": 936,
     "gates": {
       "secret_leakage": true,
       "architecture_invariants": true,
@@ -23,7 +23,8 @@
       "deepseek_v4_contracts": true,
       "deepseek_v4_pro_max_profile": true,
       "editor_undo_redo_smoke": true,
-      "hierarchical_agent_tree": true
+      "hierarchical_agent_tree": true,
+      "live_hierarchical_agent_routing": true
     }
   },
   "phases": [
