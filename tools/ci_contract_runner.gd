@@ -6,18 +6,41 @@ extends SceneTree
 ## Headless çalışır, motor sürümünü doğrular ve tüm contract/self-test
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
+##
+## Runtime hygiene: test raporu ve geçici nesneler stack'ten çıktıktan
+## sonra iki process frame beklenir. Böylece queue_free/deferred cleanup
+## işlemleri tamamlanmadan motor zorla kapatılmaz.
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
 const REQUIRED_PATCH: int = 3
 
+var _planned_exit_code: int = 0
+
 
 func _initialize() -> void:
+	# _initialize içinde doğrudan ağır test + quit yapmak, geçici Resource
+	# referansları hâlâ stack'teyken motoru kapatabilir. Ayrı çağrı scope'u.
+	call_deferred("_run_validation")
+
+
+func _run_validation() -> void:
+	_planned_exit_code = _execute_validation()
+	# Bu fonksiyon döndükten sonra report ve diğer lokaller serbest kalır.
+	call_deferred("_drain_and_quit")
+
+
+func _drain_and_quit() -> void:
+	await process_frame
+	await process_frame
+	quit(_planned_exit_code)
+
+
+func _execute_validation() -> int:
 	var version_result: Dictionary = _verify_engine_version()
 	if not bool(version_result.get("ok", false)):
 		printerr("CI_VERSION_FAIL: " + str(version_result.get("reason", "")))
-		quit(20)
-		return
+		return 20
 
 	print("CI_ENGINE_OK: " + str(version_result.get("version", "unknown")))
 
@@ -27,8 +50,7 @@ func _initialize() -> void:
 
 	if failed < 0:
 		printerr("CI_CONTRACT_FAIL: self-test geçerli sonuç döndürmedi")
-		quit(21)
-		return
+		return 21
 
 	if failed > 0:
 		printerr(
@@ -37,11 +59,10 @@ func _initialize() -> void:
 				passed,
 			]
 		)
-		quit(22)
-		return
+		return 22
 
 	print("CI_CONTRACT_OK: %d test geçti" % passed)
-	quit(0)
+	return 0
 
 
 func _verify_engine_version() -> Dictionary:
