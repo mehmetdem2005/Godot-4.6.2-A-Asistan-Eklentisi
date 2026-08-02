@@ -7,15 +7,12 @@ extends SceneTree
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
 ##
-## Faz 8 final toplamı dört bağımsız paketten oluşur:
+## Final toplamı beş bağımsız paketten oluşur:
 ##   - ana contract paketi
 ##   - mobil hardening
 ##   - gerçek repo Android audit
 ##   - release readiness manifest/audit
-##
-## Runtime hygiene: test raporu ve geçici nesneler stack'ten çıktıktan
-## sonra iki process frame beklenir. Böylece queue_free/deferred cleanup
-## işlemleri tamamlanmadan motor zorla kapatılmaz.
+##   - DeepSeek V4 Pro maksimum üretim profili
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
@@ -25,14 +22,11 @@ var _planned_exit_code: int = 0
 
 
 func _initialize() -> void:
-	# _initialize içinde doğrudan ağır test + quit yapmak, geçici Resource
-	# referansları hâlâ stack'teyken motoru kapatabilir. Ayrı çağrı scope'u.
 	call_deferred("_run_validation")
 
 
 func _run_validation() -> void:
 	_planned_exit_code = _execute_validation()
-	# Bu fonksiyon döndükten sonra report ve diğer lokaller serbest kalır.
 	call_deferred("_drain_and_quit")
 
 
@@ -54,11 +48,13 @@ func _execute_validation() -> int:
 	var mobile_report: Dictionary = AIMobileHardeningTest.build_report()
 	var android_repo_report: Dictionary = AIAndroidRepoAuditTest.build_report()
 	var release_report: Dictionary = AIReleaseReadinessTest.build_report()
+	var deepseek_pro_report: Dictionary = AIDeepSeekProMaxTest.build_report()
 	var reports: Array = [
 		core_report,
 		mobile_report,
 		android_repo_report,
 		release_report,
+		deepseek_pro_report,
 	]
 	var failed: int = 0
 	var passed: int = 0
