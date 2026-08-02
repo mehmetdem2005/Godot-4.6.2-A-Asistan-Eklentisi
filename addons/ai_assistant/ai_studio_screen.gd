@@ -309,6 +309,26 @@ func _render_tasks() -> void:
 		_tasks_log.append_text(
 			"   [color=#9CDCFE]%s[/color]\n" % str(t.get("target_file", ""))
 		)
+		var agent_title: String = str(t.get("primary_role_title", ""))
+		var department: String = str(t.get("department", ""))
+		if not agent_title.is_empty():
+			_tasks_log.append_text(
+				"   [color=#DCDCAA]Ajan:[/color] %s  [color=#888888](%s)[/color]\n"
+				% [agent_title, department]
+			)
+		var reviewers: Array = t.get("reviewer_ids", []) as Array
+		if not reviewers.is_empty():
+			var reviewer_names := PackedStringArray()
+			for reviewer in reviewers:
+				reviewer_names.append(str(reviewer))
+			_tasks_log.append_text(
+				"   [color=#C586C0]Denetçi:[/color] %s\n"
+				% ", ".join(reviewer_names)
+			)
+		if bool(t.get("high_risk", false)):
+			_tasks_log.append_text(
+				"   [color=#F44747]Yüksek risk — güvenlik incelemesi zorunlu[/color]\n"
+			)
 		var err: String = str(t.get("error", ""))
 		if not err.is_empty():
 			_tasks_log.append_text(
