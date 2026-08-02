@@ -35,13 +35,11 @@ Karar: Dış kapılar tamamlandıktan sonra yalnız Faz 8 PR'ı varsayılan dala
 | 3 — Godot 4.6.3 CI | #18 | tamamlandı | yok |
 | 4 — runtime hygiene / Undo-Redo | #20 | tamamlandı | **geçti** |
 | 5 — DeepSeek V4 geçişi | #22 | tamamlandı | Faz 6 ile birleşik |
-| 6 — canlı V4 ve metadata | #24 | tamamlandı | gerçek API çağrısı bekliyor |
+| 6 — canlı V4 ve metadata | #24 | tamamlandı | repository secret bekliyor |
 | 7 — Android/mobile hardening | #26 | tamamlandı | gerçek Android editörü bekliyor |
 | 8 — release konsolidasyonu | #28 | tamamlandı | final kullanıcı kararı |
 
-## 4. Final otomatik kanıt
-
-Son tamamlanmış kalite koşusu:
+## 4. Son kanıtlanmış otomatik kalite koşusu
 
 - commit: `a8f7bc04440c579272e5f7c713b3ec8e7c5cc997`,
 - Actions run: `30747036616`,
@@ -75,11 +73,7 @@ CI manifestteki beklenen test sayısı ile gerçek toplamı birebir karşılaşt
 SMOKE_OK: 3/3 smoke testi geçti
 ```
 
-kanıtı alındı. Do → undo → redo → cleanup zinciri şu işlemlerde doğrulandı:
-
-- node ekleme,
-- property değiştirme,
-- script bağlama.
+kanıtı alındı. Do → undo → redo → cleanup zinciri node ekleme, property değiştirme ve script bağlama işlemlerinde doğrulandı.
 
 Fixture test sonunda byte-for-byte başlangıç durumuna döndü; production `project.godot` ve eklenti dosyaları değişmedi. Manifestte bu kapı `passed` durumundadır.
 
@@ -98,6 +92,16 @@ V4_LIVE_OK
 ```
 
 birlikte bulunmalıdır. Repository secret adı `DEEPSEEK_API_KEY` olmalıdır. Anahtar repo, log veya artifact içine yazılmaz.
+
+Son otomatik deneme:
+
+- run: `30747328540`,
+- commit: `7c174d2e73cc0e89c60d6218a5aff026e6c71667`,
+- repository secret kontrolü: **başarısız**,
+- gerçek V4 Pro Max çağrısı: **çalıştırılmadı**, 
+- secret leakage adımı: çağrı olmadığı için **çalıştırılmadı**.
+
+Bu sonuç sağlayıcı veya kod hatası değildir; repository'de `DEEPSEEK_API_KEY` secret bulunmadığını kanıtlar. Secret eklenmeden kapı yeniden çalıştırılamaz ve manifest `passed` yapılamaz.
 
 ### 6.2 Android Godot editörü
 
@@ -123,15 +127,16 @@ kalır. Bütün kapılar tamamlandıktan sonra `merge_ready=true` yapılır ve f
 
 ## 8. Final birleşme prosedürü
 
-1. Gerçek V4 Pro Max ve Android cihaz kanıtlarını PR #28'e ekle.
-2. Manifestte kalan kapıları `passed`, `merge_ready` değerini `true` yap.
-3. Final 906+ testlik Godot 4.6.3 kalite koşusunu çalıştır.
-4. Secret leakage, parse/compile, contract, editor smoke, release audit ve runtime hygiene sonuçlarını incele.
-5. PR #28 tabanını `claude/godot-ai-game-builder-FRhQk` dalına retarget et.
-6. Varsayılan dala karşı diff'i yeniden incele; beklenmeyen silme veya yetki genişlemesi olmamalı.
-7. Kullanıcının açık kararı olmadan merge etme.
-8. Onay verilirse tek squash merge kullan.
-9. Release commit/tag sonrası eski stacked PR'ları `superseded by #28` notuyla kapat.
+1. `DEEPSEEK_API_KEY` repository secret eklenir ve canlı workflow çalıştırılır.
+2. Gerçek Android cihaz smoke kanıtı PR #28'e eklenir.
+3. Manifestte kalan kapılar `passed`, `merge_ready` değeri `true` yapılır.
+4. Final 906+ testlik Godot 4.6.3 kalite koşusu çalıştırılır.
+5. Secret leakage, parse/compile, contract, editor smoke, release audit ve runtime hygiene sonuçları incelenir.
+6. PR #28 tabanı `claude/godot-ai-game-builder-FRhQk` dalına retarget edilir.
+7. Varsayılan dala karşı diff yeniden incelenir; beklenmeyen silme veya yetki genişlemesi olmamalı.
+8. Kullanıcının açık kararı olmadan merge edilmez.
+9. Onay verilirse tek squash merge kullanılır.
+10. Release commit/tag sonrası eski stacked PR'lar `superseded by #28` notuyla kapatılır.
 
 ## 9. Rollback prosedürü
 
@@ -144,11 +149,11 @@ kalır. Bütün kapılar tamamlandıktan sonra `merge_ready=true` yapılır ve f
 
 ## 10. Bilinen açık riskler
 
-- DeepSeek V4 Pro Max gerçek anahtarlı çağrı kanıtı henüz kaydedilmedi.
-- Android Godot 4.6.3 editör responsive/klavye kanıtı henüz kaydedilmedi.
+- `DEEPSEEK_API_KEY` repository secret eksik; run `30747328540` secret kontrolünde durdu.
+- Android Godot 4.6.3 editör responsive/klavye kanıtı için gerçek Android cihaz gerekir.
 - Varsayılan dal ve branch protection otomatik değiştirilmedi.
 - Açık lisans dosyası yoksa dağıtım hakkı otomatik varsayılmamalıdır.
 
 ## 11. Release kararı
 
-Kod, otomatik testler ve masaüstü editör mutasyon kapısı üretim adayı seviyesindedir. Ancak gerçek sağlayıcı ve gerçek Android cihaz kanıtı olmadan sürüm dürüst biçimde `release-candidate` ve `merge_ready=false` kalır.
+Kod, 906 otomatik test ve gerçek masaüstü editör mutasyon kapısı üretim adayı seviyesindedir. Ancak gerçek sağlayıcı ve gerçek Android cihaz kanıtı olmadan sürüm dürüst biçimde `release-candidate` ve `merge_ready=false` kalır.
