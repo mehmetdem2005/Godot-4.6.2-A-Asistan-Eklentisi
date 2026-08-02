@@ -27,7 +27,8 @@ func build_request_body(request: AIProviderRequest) -> Dictionary:
 		"max_tokens": mini(
 			request.max_tokens, AIDeepSeekModelPolicy.MAX_OUTPUT_TOKENS
 		),
-		"stream": false,
+		"stream": true,
+		"stream_options": {"include_usage": true},
 		"thinking": {
 			"type": "enabled" if thinking else "disabled",
 		},

@@ -25,6 +25,9 @@ signal thought_completed(result: Dictionary)
 ## İlerleme bildirimi (UI için).
 signal thought_progress(step: String)
 
+## DeepSeek SSE parçası. kind: reasoning | content.
+signal thought_stream(kind: String, text: String, metadata: Dictionary)
+
 ## Bağlı Router — API anahtarları bunda ayarlı olmalı.
 var _router: AIProviderRouter = null
 
@@ -43,10 +46,11 @@ var _busy: bool = false
 
 func _ready() -> void:
 	if _transport == null:
-		_transport = AIHTTPTransport.new()
+		_transport = AIStreamingHTTPTransport.new()
 		_transport.name = "AgentLiveTransport"
 		_transport.live_mode = true
 		add_child(_transport)
+	_connect_stream_transport()
 
 
 ## Router'ı bağlar (orkestratörün anahtarlı router'ı verilmeli).
@@ -63,6 +67,7 @@ func router() -> AIProviderRouter:
 ## Test/ileri kullanım: dış taşıyıcı enjekte eder (ağaca eklenmiş olmalı).
 func attach_transport(transport: AIHTTPTransport) -> void:
 	_transport = transport
+	_connect_stream_transport()
 
 
 ## Bir rol + görev için AIProviderRequest kurar.
@@ -163,6 +168,22 @@ func _append_history(request: AIProviderRequest, history: Array) -> void:
 		request.add_message(role, content)
 
 
+func _connect_stream_transport() -> void:
+	if not (_transport is AIStreamingHTTPTransport):
+		return
+	var streaming := _transport as AIStreamingHTTPTransport
+	if not streaming.stream_delta.is_connected(_on_transport_stream_delta):
+		streaming.stream_delta.connect(_on_transport_stream_delta)
+
+
+func _on_transport_stream_delta(
+	kind: String, text: String, metadata: Dictionary
+) -> void:
+	if text.is_empty():
+		return
+	thought_stream.emit(kind, text, metadata.duplicate(true))
+
+
 ## Hazır bir isteği yönlendirir (cache/ağ) ve sonucu sinyalle döndürür.
 func _dispatch(request: AIProviderRequest, role: int) -> bool:
 	_active_request = request
@@ -261,7 +282,10 @@ func finalize_raw(
 			return _with_response_metadata(provider_failure, response)
 		return _with_request_metadata(provider_failure, request, status)
 
-	return _result_from_response(role, response)
+	var mapped: Dictionary = _result_from_response(role, response)
+	mapped["reasoning_content"] = str(raw_result.get("reasoning_content", ""))
+	mapped["streamed"] = bool(raw_result.get("streamed", false))
+	return mapped
 
 
 ## Köprü durumu — test ve UI için.
@@ -286,6 +310,8 @@ func _result_dict(
 		"role": role,
 		"role_name": AICellRoles.role_name(role),
 		"content": content,
+		"reasoning_content": "",
+		"streamed": false,
 		"llm_called": true,
 		"latency_ms": latency,
 		"status_note": note,

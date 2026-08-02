@@ -48,6 +48,11 @@ var _active_agents_label: Label = null
 var _settings_toggle: Button = null
 var _status_label: Label = null
 var _settings_panel: VBoxContainer = null
+var _stream_panel: VBoxContainer = null
+var _reasoning_log: RichTextLabel = null
+var _answer_stream_log: RichTextLabel = null
+var _reasoning_stream_key: String = ""
+var _answer_stream_key: String = ""
 var _key_grid: GridContainer = null
 var _key_edit: LineEdit = null
 var _key_save_btn: Button = null
@@ -92,6 +97,10 @@ func _build_ui() -> void:
 	_settings_panel = _build_settings_panel()
 	_settings_panel.visible = false
 	_root_layout.add_child(_settings_panel)
+
+	_stream_panel = _build_stream_panel()
+	_stream_panel.visible = false
+	_root_layout.add_child(_stream_panel)
 
 	_chat_log = RichTextLabel.new()
 	_chat_log.bbcode_enabled = false
@@ -195,6 +204,38 @@ func _build_settings_panel() -> VBoxContainer:
 	return panel
 
 
+func _build_stream_panel() -> VBoxContainer:
+	var panel := VBoxContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_constant_override("separation", 4)
+
+	var reasoning_title := Label.new()
+	reasoning_title.text = "DeepSeek Düşünme (reasoning_content)"
+	reasoning_title.add_theme_font_size_override("font_size", 13)
+	panel.add_child(reasoning_title)
+
+	_reasoning_log = RichTextLabel.new()
+	_reasoning_log.bbcode_enabled = false
+	_reasoning_log.scroll_following = true
+	_reasoning_log.selection_enabled = true
+	_reasoning_log.custom_minimum_size = Vector2(0, 120)
+	_reasoning_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_child(_reasoning_log)
+
+	var answer_title := Label.new()
+	answer_title.text = "Canlı Yanıt"
+	answer_title.add_theme_font_size_override("font_size", 13)
+	panel.add_child(answer_title)
+
+	_answer_stream_log = RichTextLabel.new()
+	_answer_stream_log.bbcode_enabled = false
+	_answer_stream_log.scroll_following = true
+	_answer_stream_log.selection_enabled = true
+	_answer_stream_log.custom_minimum_size = Vector2(0, 90)
+	panel.add_child(_answer_stream_log)
+	return panel
+
+
 func _on_viewport_resized() -> void:
 	_apply_responsive_layout()
 
@@ -233,6 +274,10 @@ func _apply_responsive_layout() -> void:
 	_key_edit.custom_minimum_size = Vector2(0, touch)
 	_key_save_btn.custom_minimum_size = Vector2(0, touch)
 	_model_picker.custom_minimum_size = Vector2(0, touch)
+	if _reasoning_log != null:
+		_reasoning_log.custom_minimum_size = Vector2(0, 96 if compact else 140)
+	if _answer_stream_log != null:
+		_answer_stream_log.custom_minimum_size = Vector2(0, 72 if compact else 100)
 	_reset_btn.custom_minimum_size = Vector2(0, touch)
 	_send_btn.custom_minimum_size = Vector2(0, touch)
 	_chat_log.custom_minimum_size = Vector2(
@@ -319,6 +364,8 @@ func _on_send() -> void:
 	_bridge.name = "MainLiveBridge"
 	add_child(_bridge)
 	_bridge.attach_router(router)
+	if not _bridge.thought_stream.is_connected(_on_chat_stream):
+		_bridge.thought_stream.connect(_on_chat_stream)
 	_orch = AIPipelineOrchestrator.new()
 	_orch.name = "LivePipeline"
 	add_child(_orch)
@@ -374,6 +421,15 @@ func _on_agent_event(event: Dictionary) -> void:
 		return
 	var event_type: String = str(event.get("type", ""))
 	var node_id: String = str(event.get("node_id", ""))
+	if event_type in [AILiveAgentEvent.TYPE_REASONING_CHUNK, AILiveAgentEvent.TYPE_CONTENT_CHUNK]:
+		var stream_kind: String = "reasoning" if event_type == AILiveAgentEvent.TYPE_REASONING_CHUNK else "content"
+		var stream_label: String = "%s · Katman %d · %s" % [
+			str(event.get("role_name", "Ajan")),
+			int(event.get("layer", 0)),
+			str(event.get("title", "Çalışma")),
+		]
+		_append_stream_chunk(stream_kind, str(event.get("text", "")), stream_label)
+		return
 	if event_type == AILiveAgentEvent.TYPE_STARTED:
 		_active_agents[node_id] = event.duplicate(true)
 	elif event_type == AILiveAgentEvent.TYPE_COMPLETED \
@@ -413,6 +469,44 @@ func _on_agent_event(event: Dictionary) -> void:
 		AILiveAgentEvent.TYPE_FAILED:
 			text = headline + "\nBaşarısız: " + text
 	_append_message("agent::%s::%s" % [role_name, event_type], text)
+
+
+func _on_chat_stream(kind: String, text: String, _metadata: Dictionary) -> void:
+	_append_stream_chunk(kind, text, "DeepSeek V4 Pro — MAX")
+
+
+func _append_stream_chunk(kind: String, text: String, label: String) -> void:
+	if text.is_empty() or _stream_panel == null:
+		return
+	_stream_panel.visible = true
+	var target: RichTextLabel = (
+		_reasoning_log if kind == "reasoning" else _answer_stream_log
+	)
+	if target == null:
+		return
+	var current_key: String = (
+		_reasoning_stream_key if kind == "reasoning" else _answer_stream_key
+	)
+	if current_key != label:
+		if target.get_parsed_text().length() > 0:
+			target.add_text("\n\n")
+		target.add_text("[" + label + "]\n")
+		if kind == "reasoning":
+			_reasoning_stream_key = label
+		else:
+			_answer_stream_key = label
+	target.add_text(text)
+
+
+func _clear_stream_panels() -> void:
+	_reasoning_stream_key = ""
+	_answer_stream_key = ""
+	if _reasoning_log != null:
+		_reasoning_log.clear()
+	if _answer_stream_log != null:
+		_answer_stream_log.clear()
+	if _stream_panel != null:
+		_stream_panel.visible = false
 
 
 func _on_tasks_updated(registry: Array) -> void:
@@ -571,6 +665,7 @@ func _reset_live_run_state() -> void:
 	_task_states.clear()
 	_verified_paths.clear()
 	_opened_scene_path = ""
+	_clear_stream_panels()
 	_update_active_agents_label()
 
 

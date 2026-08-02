@@ -9,14 +9,19 @@ const TYPE_STARTED: String = "started"
 const TYPE_PROGRESS: String = "progress"
 const TYPE_COMPLETED: String = "completed"
 const TYPE_FAILED: String = "failed"
+const TYPE_REASONING_CHUNK: String = "reasoning_chunk"
+const TYPE_CONTENT_CHUNK: String = "content_chunk"
 const VALID_TYPES: Array[String] = [
 	TYPE_STARTED,
 	TYPE_PROGRESS,
 	TYPE_COMPLETED,
 	TYPE_FAILED,
+	TYPE_REASONING_CHUNK,
+	TYPE_CONTENT_CHUNK,
 ]
 
 const MAX_TEXT_CHARS: int = 1200
+const MAX_STREAM_CHUNK_CHARS: int = 4096
 
 
 static func create(
@@ -36,7 +41,7 @@ static func create(
 		"layer": maxi(0, layer),
 		"role_name": _sanitize_label(role_name),
 		"title": _sanitize_label(title),
-		"text": safe_excerpt(text),
+		"text": (safe_stream_chunk(text) if event_type in [TYPE_REASONING_CHUNK, TYPE_CONTENT_CHUNK] else safe_excerpt(text)),
 		"confidence": clampf(confidence, 0.0, 1.0),
 		"worker_index": worker_index,
 		"timestamp_msec": Time.get_ticks_msec(),
@@ -58,7 +63,12 @@ static func validate(event: Dictionary) -> Dictionary:
 	var confidence: float = float(event.get("confidence", -1.0))
 	if confidence < 0.0 or confidence > 1.0:
 		errors.append("confidence 0-1 dışında")
-	if str(event.get("text", "")).length() > MAX_TEXT_CHARS + 32:
+	var text_limit: int = (
+		MAX_STREAM_CHUNK_CHARS
+		if event_type in [TYPE_REASONING_CHUNK, TYPE_CONTENT_CHUNK]
+		else MAX_TEXT_CHARS + 32
+	)
+	if str(event.get("text", "")).length() > text_limit:
 		errors.append("event metni sınırı aşıyor")
 	return {"ok": errors.is_empty(), "errors": errors}
 
@@ -69,6 +79,14 @@ static func safe_excerpt(raw_text: String) -> String:
 	if text.length() <= MAX_TEXT_CHARS:
 		return text
 	return text.left(MAX_TEXT_CHARS) + "\n… [çıktı mobil akış için kırpıldı]"
+
+
+static func safe_stream_chunk(raw_text: String) -> String:
+	var text: String = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+	text = _redact_secrets(text)
+	if text.length() <= MAX_STREAM_CHUNK_CHARS:
+		return text
+	return text.left(MAX_STREAM_CHUNK_CHARS)
 
 
 static func _sanitize_label(raw: String) -> String:

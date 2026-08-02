@@ -114,6 +114,7 @@ func _rebuild_workers() -> void:
 		worker.attach_router(_router)
 		worker.thought_completed.connect(_on_worker_completed.bind(index))
 		worker.thought_progress.connect(_on_worker_progress.bind(index))
+		worker.thought_stream.connect(_on_worker_stream.bind(index))
 		_workers.append(worker)
 
 
@@ -239,6 +240,29 @@ func _on_worker_completed(result: Dictionary, worker_index: int) -> void:
 	)
 	_emit_graph()
 	call_deferred("_dispatch_ready")
+
+
+func _on_worker_stream(
+	kind: String, text: String, metadata: Dictionary, worker_index: int
+) -> void:
+	if not _running or not _worker_node_ids.has(worker_index):
+		return
+	var current := _graph.node(str(_worker_node_ids[worker_index]))
+	if current == null:
+		return
+	var event_type: String = (
+		AILiveAgentEvent.TYPE_REASONING_CHUNK
+		if kind == "reasoning"
+		else AILiveAgentEvent.TYPE_CONTENT_CHUNK
+	)
+	_emit_agent_event(
+		event_type,
+		current,
+		worker_index,
+		text,
+		current.confidence,
+		metadata
+	)
 
 
 func _on_worker_progress(step: String, worker_index: int) -> void:

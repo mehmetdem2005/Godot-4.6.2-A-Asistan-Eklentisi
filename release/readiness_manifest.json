@@ -12,7 +12,7 @@
     "rollback_ref": "d9565c48f756420f2fd93e2aad773cf23d530d81"
   },
   "automatic": {
-    "expected_test_count": 1018,
+    "expected_test_count": 1032,
     "gates": {
       "secret_leakage": true,
       "architecture_invariants": true,
@@ -28,7 +28,8 @@
       "agent_coordination_runtime": true,
       "adaptive_parallel_deep_deliberation": true,
       "unified_live_agent_workspace": true,
-      "loadable_godot_artifact_verification": true
+      "loadable_godot_artifact_verification": true,
+      "deepseek_reasoning_sse_stream": true
     }
   },
   "phases": [
