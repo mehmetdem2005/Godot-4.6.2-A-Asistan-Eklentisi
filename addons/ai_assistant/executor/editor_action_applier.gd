@@ -49,21 +49,38 @@ func _scene_context(plan: Dictionary) -> Dictionary:
 
 	var expected: String = str(plan.get("scene_path", "")).strip_edges()
 	var actual: String = root.scene_file_path.strip_edges()
-	if not expected.is_empty():
+	if expected == AISceneActionPlanner.ACTIVE_EDITED_SCENE_TARGET:
+		# '@edited_scene' serbest hedef değildir. Kullanıcının editörde
+		# açık tuttuğu sahnenin gerçek ve kayıtlı yolu burada bağlanır;
+		# kaydedilmemiş sahnede mutasyon yapılmaz.
 		if actual.is_empty():
 			return {
 				"ok": false,
 				"available": true,
-				"reason": "Açık sahne henüz kaydedilmemiş; hedef: %s" % expected,
+				"reason": "Aktif sahne henüz kaydedilmemiş; önce .tscn olarak kaydet",
 			}
-		if actual.simplify_path() != expected.simplify_path():
-			return {
-				"ok": false,
-				"available": true,
-				"reason": "Yanlış sahne açık. Beklenen: %s, açık: %s" % [
-					expected, actual,
-				],
-			}
+		expected = actual
+	elif expected.is_empty():
+		return {
+			"ok": false,
+			"available": true,
+			"reason": "Editör mutasyonu için hedef sahne belirtilmedi",
+		}
+
+	if actual.is_empty():
+		return {
+			"ok": false,
+			"available": true,
+			"reason": "Açık sahne henüz kaydedilmemiş; hedef: %s" % expected,
+		}
+	if actual.simplify_path() != expected.simplify_path():
+		return {
+			"ok": false,
+			"available": true,
+			"reason": "Yanlış sahne açık. Beklenen: %s, açık: %s" % [
+				expected, actual,
+			],
+		}
 
 	var undo_redo: EditorUndoRedoManager = EditorInterface.get_editor_undo_redo()
 	if undo_redo == null:
