@@ -21,7 +21,8 @@
       "runtime_hygiene": true,
       "android_repo_audit": true,
       "deepseek_v4_contracts": true,
-      "deepseek_v4_pro_max_profile": true
+      "deepseek_v4_pro_max_profile": true,
+      "editor_undo_redo_smoke": true
     }
   },
   "phases": [
@@ -94,9 +95,12 @@
     {
       "id": "editor_undo_redo",
       "phase": 4,
-      "status": "pending",
+      "status": "passed",
       "evidence_marker": "SMOKE_OK: 3/3 smoke testi geçti",
-      "procedure": "tools/editor_smoke/README.md"
+      "procedure": "tools/editor_smoke/README.md",
+      "evidence_run": 30747036616,
+      "evidence_artifact": 8833211445,
+      "evidence_commit": "a8f7bc04440c579272e5f7c713b3ec8e7c5cc997"
     },
     {
       "id": "deepseek_v4_live",
@@ -114,7 +118,6 @@
     }
   ],
   "open_risks": [
-    "Canlı EditorUndoRedoManager davranışı gerçek masaüstü editörde henüz kanıtlanmadı.",
     "DeepSeek V4 Pro gerçek anahtarlı canlı çağrı kanıtı henüz eklenmedi.",
     "Android Godot 4.6.3 editör responsive ve klavye smoke kanıtı henüz eklenmedi."
   ]
