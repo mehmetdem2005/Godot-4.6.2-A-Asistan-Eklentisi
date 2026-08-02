@@ -223,16 +223,26 @@ jobs:
               echo "Contract success marker missing" >&2
               exit 48
             }
-          grep -Fq -- "=== DeepSeek Reasoning Stream Test Sonuçları ===" \
+          grep -Fq -- "--- 66 geçti, 0 başarısız (toplam 66) ---" \
             ci-logs/contract-tests.log || {
-              echo "DeepSeek reasoning stream test report missing" >&2
+              echo "Adaptive/streaming aggregate package incomplete" >&2
               exit 49
             }
-          grep -Fq -- "--- 14 geçti, 0 başarısız (toplam 14) ---" \
-            ci-logs/contract-tests.log || {
-              echo "DeepSeek reasoning stream test package incomplete" >&2
+          required_stream_markers=(
+            "✓ reasoning_content ayrı okunur"
+            "✓ content ayrı okunur"
+            "✓ UTF-8 byte byte bölünse de bozulmaz"
+            "✓ V4 Pro isteği stream=true"
+            "✓ Profil SSE reasoning desteğini bildirir"
+            "✓ Reasoning chunk olayı geçerli"
+          )
+          for marker in "${required_stream_markers[@]}"; do
+            grep -Fq -- "${marker}" ci-logs/contract-tests.log || {
+              echo "DeepSeek reasoning stream marker missing: ${marker}" >&2
               exit 50
             }
+          done
+          echo "DeepSeek reasoning stream markers passed"
           echo "Complete contract marker gate passed: ${expected}/${expected}"
 
       - name: Runtime hygiene gate
