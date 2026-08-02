@@ -107,18 +107,24 @@
       "phase": 6,
       "status": "pending",
       "evidence_marker": "V4_LIVE_OK",
-      "procedure": "tools/DEEPSEEK_V4_LIVE_TEST.md"
+      "procedure": "tools/DEEPSEEK_V4_LIVE_TEST.md",
+      "blocker": "repository_secret_missing",
+      "required_secret": "DEEPSEEK_API_KEY",
+      "last_attempt_run": 30747328540,
+      "last_attempt_commit": "7c174d2e73cc0e89c60d6218a5aff026e6c71667",
+      "last_attempt_outcome": "secret_check_failed_live_call_skipped"
     },
     {
       "id": "android_editor",
       "phase": 7,
       "status": "pending",
       "evidence_marker": "ANDROID_SMOKE_OK: 6/6",
-      "procedure": "tools/ANDROID_EDITOR_SMOKE.md"
+      "procedure": "tools/ANDROID_EDITOR_SMOKE.md",
+      "blocker": "real_android_godot_editor_required"
     }
   ],
   "open_risks": [
-    "DeepSeek V4 Pro gerçek anahtarlı canlı çağrı kanıtı henüz eklenmedi.",
-    "Android Godot 4.6.3 editör responsive ve klavye smoke kanıtı henüz eklenmedi."
+    "DEEPSEEK_API_KEY repository secret bulunmadığı için gerçek V4 Pro Max çağrısı çalıştırılamadı; run 30747328540 secret kontrolünde durdu.",
+    "Android Godot 4.6.3 editör responsive ve klavye smoke kanıtı için gerçek Android cihaz gerekir."
   ]
 }
