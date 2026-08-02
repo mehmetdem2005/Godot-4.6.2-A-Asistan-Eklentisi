@@ -1,24 +1,23 @@
 @tool
 extends SceneTree
 
-## DeepSeek V4 canlı sağlayıcı doğrulayıcısı — Faz 6.
+## DeepSeek V4 Pro maksimum profil canlı doğrulayıcısı.
 ##
-## Amaç: yalnız HTTP 200 görmek değil; V4 Pro model kimliği, token
-## kullanımı, finish_reason, gecikme, request eşlemesi ve içerik bütünlüğünü
-## aynı gerçek çağrıda doğrulamak.
+## Yalnız HTTP 200 görmek yeterli değildir. Bu runner önce ağ gövdesini
+## denetler, ardından gerçek çağrıda model kimliği, token kullanımı,
+## finish_reason, gecikme, request eşlemesi ve secret redaksiyonunu kanıtlar.
 ##
 ## Çalıştırma:
 ##   DEEPSEEK_KEY=... godot --headless --path . \
 ##     --script res://tools/deepseek_v4_live_runner.gd
 ##
 ## Alternatif ortam değişkeni: DEEPSEEK_API_KEY
-##
-## Güvenlik: anahtar hiçbir zaman yazdırılmaz, dosyaya kaydedilmez veya
-## sonuç sözlüğüne eklenmez. Başarı raporu yalnız güvenli metadata içerir.
 
-const TIMEOUT_SECONDS: float = 120.0
+const TIMEOUT_SECONDS: float = 1800.0
+const LIVE_MARKER: String = "V4_CANLI_TAMAM"
 
 var _bridge: AIAgentLiveBridge = null
+var _router: AIProviderRouter = null
 var _secret_key: String = ""
 var _started: bool = false
 var _finished: bool = false
@@ -35,13 +34,13 @@ func _initialize() -> void:
 		quit(2)
 		return
 
-	var router := AIProviderRouter.new()
-	router.set_api_key(AIProviderRequest.Provider.DEEPSEEK, _secret_key)
+	_router = AIProviderRouter.new()
+	_router.set_api_key(AIProviderRequest.Provider.DEEPSEEK, _secret_key)
 
 	_bridge = AIAgentLiveBridge.new()
 	_bridge.name = "DeepSeekV4LiveBridge"
 	get_root().add_child(_bridge)
-	_bridge.attach_router(router)
+	_bridge.attach_router(_router)
 	_bridge.thought_progress.connect(_on_progress)
 	_bridge.thought_completed.connect(_on_completed)
 
@@ -67,20 +66,72 @@ func _process(delta: float) -> bool:
 
 
 func _begin_live_request() -> void:
-	print("=== DEEPSEEK V4 PRO CANLI DOĞRULAMA ===")
+	print("=== DEEPSEEK V4 PRO MAX CANLI DOĞRULAMA ===")
 	print("Beklenen model: " + AIDeepSeekModelPolicy.MODEL_PRO)
-	print("Beklenen politika: CODE amacı, thinking=disabled")
+	print("Beklenen politika: thinking=enabled, reasoning_effort=max")
+	print("Beklenen max_tokens: " + str(AIDeepSeekModelPolicy.MAX_OUTPUT_TOKENS))
+
+	var request: AIProviderRequest = _bridge.build_request_for(
+		AICellRoles.Role.CODE_ENGINEER,
+		"Sadece tek satır düz metin olarak %s yaz. " % LIVE_MARKER
+		+ "Markdown, açıklama veya ek karakter kullanma.",
+		{},
+		AIDeepSeekModelPolicy.MODEL_PRO
+	)
+	if request == null:
+		_fail_start("canlı istek sözleşmesi kurulamadı")
+		return
+
+	var routed: Dictionary = _router.route(request)
+	var profile_errors: Array[String] = _validate_prepared_profile(routed)
+	if not profile_errors.is_empty():
+		for error in profile_errors:
+			print("  PROFİL HATASI: " + error)
+		_fail_start("V4 Pro maksimum istek profili doğrulanamadı")
+		return
+	print("V4_MAX_PROFILE_OK")
+
 	var started: bool = _bridge.think_live(
 		AICellRoles.Role.CODE_ENGINEER,
-		"Sadece tek satır düz metin olarak V4_CANLI_TAMAM yaz. "
+		"Sadece tek satır düz metin olarak %s yaz. " % LIVE_MARKER
 		+ "Markdown, açıklama veya ek karakter kullanma.",
 		{},
 		AIDeepSeekModelPolicy.MODEL_PRO
 	)
 	if not started:
-		print("V4_LIVE_START_FAILED: canlı istek başlatılamadı")
-		_exit_code = 3
-		_finished = true
+		_fail_start("canlı istek başlatılamadı")
+
+
+func _validate_prepared_profile(routed: Dictionary) -> Array[String]:
+	var failures: Array[String] = []
+	if bool(routed.get("resolved", false)):
+		failures.append("router ağ isteği hazırlamak yerine erken çözüldü")
+		return failures
+	if not bool(routed.get("needs_network", false)):
+		failures.append("needs_network=true değil")
+		return failures
+	var prepared: Dictionary = routed.get("prepared", {})
+	var body: Dictionary = prepared.get("body", {})
+	if str(body.get("model", "")) != AIDeepSeekModelPolicy.MODEL_PRO:
+		failures.append("model deepseek-v4-pro değil")
+	var thinking: Dictionary = body.get("thinking", {})
+	if str(thinking.get("type", "")) != "enabled":
+		failures.append("thinking enabled değil")
+	if str(body.get("reasoning_effort", "")) != "max":
+		failures.append("reasoning_effort max değil")
+	if int(body.get("max_tokens", 0)) != AIDeepSeekModelPolicy.MAX_OUTPUT_TOKENS:
+		failures.append("max_tokens 384000 değil")
+	if body.has("temperature"):
+		failures.append("thinking gövdesinde temperature var")
+	if not str(prepared.get("url", "")).begins_with("https://"):
+		failures.append("endpoint HTTPS değil")
+	return failures
+
+
+func _fail_start(reason: String) -> void:
+	print("V4_LIVE_START_FAILED: " + reason)
+	_exit_code = 3
+	_finished = true
 
 
 func _on_progress(step: String) -> void:
@@ -116,6 +167,8 @@ func _on_completed(result: Dictionary) -> void:
 		failures.append("HTTP başarı durumu yok: %d" % http_status)
 	if content.is_empty():
 		failures.append("yanıt içeriği boş")
+	if not content.contains(LIVE_MARKER):
+		failures.append("beklenen canlı içerik işareti yok")
 	if input_tokens <= 0:
 		failures.append("input_tokens raporlanmadı")
 	if output_tokens <= 0:
