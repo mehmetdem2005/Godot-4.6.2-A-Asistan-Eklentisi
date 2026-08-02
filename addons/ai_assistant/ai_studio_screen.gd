@@ -11,6 +11,18 @@ extends Control
 ## artık aynı birleşik zaman çizelgesine yönlenir; SETTINGS paneli açar.
 enum View { CHAT, TASKS, SETTINGS, WORKSPACE }
 
+## Eski görev-durum tüketicileri ve contract testleri için public sözleşme.
+## Menü mimarisi geri getirilmez; birleşik zaman çizelgesi aynı renkleri
+## durum mesajlarında kullanabilir.
+const STATUS_COLORS: Dictionary = {
+	"bekliyor": "#888888",
+	"çalışıyor": "#DCDCAA",
+	"onarılıyor": "#D7BA7D",
+	"onay-bekliyor": "#C586C0",
+	"tamam": "#4EC9B0",
+	"başarısız": "#F44747",
+}
+
 const MAX_VISIBLE_AGENT_EVENTS: int = 180
 const MAX_AGENT_RESULT_CHARS: int = 900
 
