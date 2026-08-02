@@ -2,41 +2,24 @@
 class_name AIExecutorEngine
 extends RefCounted
 
-## ExecutorEngine — çalıştırma motoru (Layer 4).
+## ExecutorEngine — doğrulanmış ActionSpec işlemlerini çalıştıran çekirdek.
 ##
-## Layer 3 Planner bir plan kurar. Bu motor o planın ACTION düğümlerini
-## ALIR ve GERÇEKTEN çalıştırır — dosya oluşturur, yazar, siler, taşır.
-##
-## Her ACTION bir AIActionSpec taşır (Layer 0 contract). Motor:
-##   1. ActionSpec'i okur — ne yapılacak?
-##   2. Risk değerlendirir — yüksek riskli işlem işaretlenir (HITL Layer 8)
-##   3. SandboxedFileOp ile çalıştırır — tam koruma zinciri
-##   4. Sonucu AIVerificationResult olarak raporlar — kanıt-temelli
-##
-## Mock policy: işlem gerçekten yapılır. Desteklenmeyen action tipi için
-## sahte başarı DÖNMEZ — NOT_IMPLEMENTED outcome'u ile açıkça raporlar.
-
-## Bu motor AIActionSpec.ActionType enum değerlerini işler.
-## Layer 4'ün desteklediği tipler (diğerleri NOT_IMPLEMENTED raporlanır):
-##   FILE_WRITE, FILE_DELETE, SCENE_CREATE (mkdir benzeri), CUSTOM (move)
-## NODE_*, SHADER_*, PROPERTY_SET gibi sahne-içi tipler Layer sonrası
-## (SceneEngineer cell) eklenecek — şimdilik açıkça SKIP raporlanır.
+## Dosya işlemleri sandbox + journal + undo snapshot hattından geçer.
+## Editör işlemleri saf planner tarafından doğrulanır ve Godot'un kendi
+## EditorUndoRedoManager geçmişi üzerinden uygulanır.
 
 var _journal: AIOperationJournal
 var _undo: AIUndoStack
 var _file_op: AISandboxedFileOp
+var _approved_destructive_actions: Dictionary = {}
 
-## Kaynak kotası — disk/dosya sayısı/boyut limitleri.
 var quota: AIResourceQuota
-
-## Hız sınırlayıcı — saniye-pencere işlem limiti.
 var rate_limiter: AIRateLimiter
 
-## Onaysız yüksek-riskli (yıkıcı) işlem çalıştırılsın mı? Varsayılan: HAYIR.
-## Layer 8 HITL gelene kadar yıkıcı işlemler güvenli tarafta tutulur.
+## Geriye uyumluluk alanı. true yapılırsa yalnızca sıradaki TEK yıkıcı
+## işlem için kullanılır ve hemen false'a döner. Kalıcı sınırsız yetki
+## vermez. Yeni kod approve_destructive_action() kullanmalıdır.
 var allow_high_risk: bool = false
-
-## Yazımdan sonra IntegrityVerifier ile bütünlük doğrulansın mı? Varsayılan: EVET.
 var verify_after_write: bool = true
 
 
@@ -48,9 +31,6 @@ func _init() -> void:
 	rate_limiter = AIRateLimiter.new()
 
 
-## Çökme sonrası kurtarma — açılışta çağrılır.
-## Journal'ı yükler; yarım kalan (PENDING) işlem varsa raporlar.
-## Dönen: {ok, pending_count, pending_paths}
 func initialize() -> Dictionary:
 	var loaded: bool = _journal.load_from_disk()
 	var pending: Array = _journal.pending_operations()
@@ -64,41 +44,65 @@ func initialize() -> Dictionary:
 	}
 
 
-## Mevcut bir dosyanın içeriğini güvenli okur (cerrahi düzenleme için —
-## Pipeline, tüm dosyayı EZMEDEN SEARCH/REPLACE uygulayabilsin diye
-## önce mevcut içeriği buradan okur). FS'e dokunan tek nokta yine
-## SandboxedFileOp'tur (PathGuard korumalı). Dönen: {ok, content, error}
 func read_existing(path: String) -> Dictionary:
 	return _file_op.read_file(path)
 
 
-# ============================================================
-# RİSK DEĞERLENDİRME
-# ============================================================
-
-## Bir action'ın yüksek riskli (yıkıcı) olup olmadığını söyler.
-## ActionSpec contract'ının kendi is_destructive() kararını kullanır —
-## risk tanımı tek yerde (contract'ta) yaşar, burada tekrarlanmaz.
 static func is_high_risk(spec: AIActionSpec) -> bool:
 	if spec == null:
-		return true  # bilinmeyen = güvenli tarafta, riskli say
+		return true
 	return spec.is_destructive()
 
 
-# ============================================================
-# ÇALIŞTIRMA
-# ============================================================
+## Belirli bir ActionSpec için tek kullanımlık yıkıcı işlem izni üretir.
+## İzin action id + idempotency key'e bağlıdır; başka action kullanamaz.
+func approve_destructive_action(spec: AIActionSpec) -> Dictionary:
+	if spec == null:
+		return {"ok": false, "reason": "ActionSpec null"}
+	if not spec.is_destructive():
+		return {"ok": false, "reason": "Action yıkıcı değil; izin gerekmiyor"}
+	if spec.id.strip_edges().is_empty() or spec.idempotency_key.strip_edges().is_empty():
+		return {"ok": false, "reason": "Action kimliği veya idempotency key eksik"}
+	var key: String = _approval_key(spec)
+	_approved_destructive_actions[key] = true
+	return {"ok": true, "reason": "Tek kullanımlık izin üretildi", "key": key}
 
-## Tek bir ACTION düğümünü çalıştırır.
-## node: AIPlanNode (ACTION seviyesi). action_spec parametreleri taşır.
-## Dönen: AIVerificationResult — başarı/başarısızlık + kanıt.
+
+func revoke_destructive_action(spec: AIActionSpec) -> bool:
+	if spec == null:
+		return false
+	var key: String = _approval_key(spec)
+	if not _approved_destructive_actions.has(key):
+		return false
+	_approved_destructive_actions.erase(key)
+	return true
+
+
+func pending_destructive_approvals() -> int:
+	return _approved_destructive_actions.size()
+
+
+func _approval_key(spec: AIActionSpec) -> String:
+	return "%s::%s" % [spec.id, spec.idempotency_key]
+
+
+func _consume_destructive_approval(spec: AIActionSpec) -> bool:
+	var key: String = _approval_key(spec)
+	if _approved_destructive_actions.has(key):
+		_approved_destructive_actions.erase(key)
+		return true
+	if allow_high_risk:
+		# Eski entegrasyonları kırmadan geniş yetkiyi tek kullanımlığa indir.
+		allow_high_risk = false
+		return true
+	return false
+
+
 func execute_action(node: AIPlanNode, action_spec: AIActionSpec) -> AIVerificationResult:
 	var result := AIVerificationResult.create(
 		AIVerificationResult.VerifyLevel.RUNTIME,
 		node.id if node != null else "?"
 	)
-
-	# Girdi doğrulama
 	if node == null:
 		result.mark_fail("Çalıştırılacak düğüm null")
 		return result
@@ -106,32 +110,25 @@ func execute_action(node: AIPlanNode, action_spec: AIActionSpec) -> AIVerificati
 		result.mark_fail("Sadece ACTION seviyesi düğüm çalıştırılır")
 		return result
 	if action_spec == null:
-		result.mark_fail("ActionSpec yok — ne yapılacağı belirsiz")
+		result.mark_fail("ActionSpec yok — işlem belirsiz")
 		return result
 
-	var action_type: int = action_spec.action_type
-
-	# Risk kapısı — yıkıcı işlem onaysız çalışmaz
-	if is_high_risk(action_spec) and not allow_high_risk:
+	if is_high_risk(action_spec) and not _consume_destructive_approval(action_spec):
 		result.outcome = AIVerificationResult.Outcome.SKIP
 		result.message = (
-			"Yıkıcı işlem '%s' HITL onayı bekliyor (Layer 8)"
+			"Yıkıcı işlem '%s' bu ActionSpec'e bağlı tek kullanımlık onay bekliyor"
 			% action_spec.action_type_name()
 		)
 		return result
 
-	# Action tipine göre yönlendir
-	match action_type:
+	match action_spec.action_type:
 		AIActionSpec.ActionType.FILE_WRITE:
 			return _exec_write(action_spec, result)
 		AIActionSpec.ActionType.FILE_DELETE:
 			return _exec_delete(action_spec, result)
 		AIActionSpec.ActionType.SCENE_CREATE:
-			# SCENE_CREATE şimdilik klasör+iskelet dosya olarak ele alınır;
-			# tam sahne ağacı kurma SceneEngineer cell'inde gelecek.
 			return _exec_mkdir(action_spec, result)
 		AIActionSpec.ActionType.CUSTOM:
-			# CUSTOM: params.op alanı alt-işlemi belirler (örn. taşıma)
 			return _exec_custom(action_spec, result)
 		AIActionSpec.ActionType.NODE_ADD, \
 		AIActionSpec.ActionType.NODE_REMOVE, \
@@ -140,92 +137,82 @@ func execute_action(node: AIPlanNode, action_spec: AIActionSpec) -> AIVerificati
 		AIActionSpec.ActionType.PROJECT_SETTING:
 			return _exec_editor_action(action_spec, result)
 		_:
-			# Desteklenmeyen tip — SAHTE BAŞARI YOK (mock policy)
 			result.outcome = AIVerificationResult.Outcome.SKIP
-			result.message = (
-				"Action tipi '%s' Layer 4'te desteklenmiyor (NOT_IMPLEMENTED)"
-				% action_spec.action_type_name()
-			)
+			result.message = "Action tipi desteklenmiyor: %s" % action_spec.action_type_name()
 			return result
 
 
-## Bir plan'ın tüm hazır ACTION'larını sırayla çalıştırır.
-## planner: AIHierarchicalPlanner. specs: node_id -> AIActionSpec eşlemesi.
-## Dönen: AIVerificationResult listesi (her çalıştırılan action için bir tane).
 func execute_ready_actions(
 	planner: AIHierarchicalPlanner, specs: Dictionary
 ) -> Array:
 	var results: Array = []
-	var ready: PackedStringArray = planner.ready_nodes()
-	for node_id in ready:
+	for node_id in planner.ready_nodes():
 		var node: AIPlanNode = planner.tree.get_node(node_id)
 		if node == null or node.level != AIPlanNode.Level.ACTION:
 			continue
 		var spec: AIActionSpec = specs.get(node_id, null)
-		var res: AIVerificationResult = execute_action(node, spec)
-		results.append(res)
-		# Başarılıysa planner'da tamamlandı işaretle
-		if res.outcome == AIVerificationResult.Outcome.PASS:
+		var action_result: AIVerificationResult = execute_action(node, spec)
+		results.append(action_result)
+		if action_result.outcome == AIVerificationResult.Outcome.PASS:
 			planner.mark_completed(node_id)
 	return results
 
 
-# ============================================================
-# ACTION TİPİ UYGULAYICILARI
-# ============================================================
-
-func _exec_write(spec: AIActionSpec, result: AIVerificationResult) -> AIVerificationResult:
-	var path: String = spec.params.get("path", "")
-	var content: String = spec.params.get("content", "")
+func _exec_write(
+	spec: AIActionSpec, result: AIVerificationResult
+) -> AIVerificationResult:
+	var path: String = str(spec.params.get("path", ""))
+	var content: String = str(spec.params.get("content", ""))
 	if path.is_empty():
 		result.mark_fail("write_file: 'path' parametresi eksik")
 		return result
 
-	# --- Hız limiti kontrolü ---
 	var now_unix: int = AIContractBase.iso_to_unix(AIContractBase.now_iso())
 	var rate_check: Dictionary = rate_limiter.check_allowed(now_unix)
-	if not rate_check["allowed"]:
+	if not bool(rate_check["allowed"]):
 		result.outcome = AIVerificationResult.Outcome.SKIP
 		result.message = "Hız limiti: %s" % rate_check["reason"]
 		return result
 
-	# --- Kota kontrolü ---
 	var content_size: int = content.to_utf8_buffer().size()
 	var is_new: bool = not _file_op.file_exists(path)
 	var old_size: int = 0
 	if not is_new:
 		var old_read: Dictionary = _file_op.read_file(path)
-		if old_read["ok"]:
-			old_size = (old_read["content"] as String).to_utf8_buffer().size()
-	var quota_check: Dictionary = quota.check_write_allowed(content_size, is_new, old_size)
-	if not quota_check["allowed"]:
+		if bool(old_read["ok"]):
+			old_size = str(old_read["content"]).to_utf8_buffer().size()
+	var quota_check: Dictionary = quota.check_write_allowed(
+		content_size, is_new, old_size
+	)
+	if not bool(quota_check["allowed"]):
 		result.outcome = AIVerificationResult.Outcome.SKIP
 		result.message = "Kota: %s" % quota_check["reason"]
 		return result
 
-	# --- Gerçek yazma ---
-	var op: Dictionary = _file_op.write_file(path, content)
-	if not op["ok"]:
-		result.mark_fail("write_file başarısız: %s" % op["error"])
+	var operation: Dictionary = _file_op.write_file(path, content)
+	if not bool(operation["ok"]):
+		result.mark_fail("write_file başarısız: %s" % operation["error"])
 		return result
-
-	# --- Yazımdan sonra: sayaçları güncelle ---
 	quota.record_write(content_size, is_new, old_size)
 	rate_limiter.record(now_unix)
 
-	# --- Bütünlük doğrulama: yazdığım DOĞRU mu? ---
 	if verify_after_write:
 		var integrity: Dictionary = AIIntegrityVerifier.verify_written(path, content)
-		if not integrity["ok"]:
-			# Yazıldı ama bozuk — bu bir BAŞARISIZLIK, gizlenmez
-			result.mark_fail("Bütünlük doğrulama başarısız: %s" % integrity["reason"])
+		if not bool(integrity["ok"]):
+			# Yazma gerçekleşti; bütünlük başarısızsa otomatik geri al.
+			var rollback: Dictionary = _file_op.undo(str(operation["undo_token"]))
+			result.mark_fail(
+				"Bütünlük doğrulama başarısız: %s; rollback=%s" % [
+					integrity["reason"], str(rollback.get("ok", false)),
+				]
+			)
 			return result
 
 	result.mark_pass(
 		{
 			"path": path,
-			"op_id": op["op_id"],
-			"undo_token": op["undo_token"],
+			"op_id": operation["op_id"],
+			"undo_token": operation["undo_token"],
 			"size": content_size,
 			"integrity_verified": verify_after_write,
 		},
@@ -235,163 +222,161 @@ func _exec_write(spec: AIActionSpec, result: AIVerificationResult) -> AIVerifica
 	return result
 
 
-func _exec_delete(spec: AIActionSpec, result: AIVerificationResult) -> AIVerificationResult:
-	var path: String = spec.params.get("path", "")
+func _exec_delete(
+	spec: AIActionSpec, result: AIVerificationResult
+) -> AIVerificationResult:
+	var path: String = str(spec.params.get("path", ""))
 	if path.is_empty():
 		result.mark_fail("delete_file: 'path' parametresi eksik")
 		return result
-
-	var op: Dictionary = _file_op.delete_file(path)
-	if op["ok"]:
+	var operation: Dictionary = _file_op.delete_file(path)
+	if bool(operation["ok"]):
 		result.mark_pass(
-			{"path": path, "op_id": op["op_id"], "undo_token": op["undo_token"]},
+			{
+				"path": path,
+				"op_id": operation["op_id"],
+				"undo_token": operation["undo_token"],
+			},
 			"file_delete"
 		)
 		result.message = "Dosya silindi: %s" % path
 	else:
-		result.mark_fail("delete_file başarısız: %s" % op["error"])
+		result.mark_fail("delete_file başarısız: %s" % operation["error"])
 	return result
 
 
-func _exec_custom(spec: AIActionSpec, result: AIVerificationResult) -> AIVerificationResult:
-	# CUSTOM action — params.op alt-işlemi belirler.
-	var sub_op: String = spec.params.get("op", "")
-	match sub_op:
+func _exec_custom(
+	spec: AIActionSpec, result: AIVerificationResult
+) -> AIVerificationResult:
+	var sub_operation: String = str(spec.params.get("op", ""))
+	match sub_operation:
 		"move_file":
-			var from_path: String = spec.params.get("from", "")
-			var to_path: String = spec.params.get("to", "")
+			var from_path: String = str(spec.params.get("from", ""))
+			var to_path: String = str(spec.params.get("to", ""))
 			if from_path.is_empty() or to_path.is_empty():
 				result.mark_fail("move_file: 'from'/'to' parametresi eksik")
 				return result
-			var op: Dictionary = _file_op.move_file(from_path, to_path)
-			if op["ok"]:
+			var operation: Dictionary = _file_op.move_file(from_path, to_path)
+			if bool(operation["ok"]):
 				result.mark_pass(
-					{"from": from_path, "to": to_path, "op_id": op["op_id"]},
+					{
+						"from": from_path,
+						"to": to_path,
+						"op_id": operation["op_id"],
+					},
 					"file_move"
 				)
 				result.message = "Dosya taşındı: %s -> %s" % [from_path, to_path]
 			else:
-				result.mark_fail("move_file başarısız: %s" % op["error"])
+				result.mark_fail("move_file başarısız: %s" % operation["error"])
 			return result
 		_:
 			result.outcome = AIVerificationResult.Outcome.SKIP
-			result.message = "CUSTOM alt-işlem desteklenmiyor: '%s'" % sub_op
+			result.message = "CUSTOM alt-işlem desteklenmiyor: '%s'" % sub_operation
 			return result
 
 
-func _exec_mkdir(spec: AIActionSpec, result: AIVerificationResult) -> AIVerificationResult:
-	var path: String = spec.params.get("path", "")
+func _exec_mkdir(
+	spec: AIActionSpec, result: AIVerificationResult
+) -> AIVerificationResult:
+	var path: String = str(spec.params.get("path", ""))
 	if path.is_empty():
 		result.mark_fail("make_dir: 'path' parametresi eksik")
 		return result
-
-	var op: Dictionary = _file_op.make_dir(path)
-	if op["ok"]:
+	var operation: Dictionary = _file_op.make_dir(path)
+	if bool(operation["ok"]):
 		result.mark_pass({"path": path}, "dir_create")
 		result.message = "Klasör oluşturuldu: %s" % path
 	else:
-		result.mark_fail("make_dir başarısız: %s" % op["error"])
+		result.mark_fail("make_dir başarısız: %s" % operation["error"])
 	return result
 
 
-## Editör mutasyon işlemleri (NODE_ADD/REMOVE, PROPERTY_SET,
-## SCRIPT_ATTACH, PROJECT_SETTING). Karar: SceneActionPlanner (saf,
-## test edilmiş). Uygulama: EditorActionApplier (canlı editör — ince).
-## Plan geçmezse FAIL. Editör yoksa SKIP (dürüst — sahte "yapıldı"
-## YOK). Uygulanırsa PASS.
 func _exec_editor_action(
 	spec: AIActionSpec, result: AIVerificationResult
 ) -> AIVerificationResult:
+	var planner_params: Dictionary = spec.params.duplicate(true)
+	if spec.action_type != AIActionSpec.ActionType.PROJECT_SETTING:
+		# ActionSpec.target_path editlenecek sahneyi tanımlar. Model yalnız
+		# node_path vererek o anda açık olan farklı sahneyi değiştiremez.
+		planner_params["scene_path"] = spec.target_path
+
 	var planner := AISceneActionPlanner.new()
-	var plan: Dictionary = planner.plan_for(spec.action_type, spec.params)
+	var plan: Dictionary = planner.plan_for(spec.action_type, planner_params)
 	if not bool(plan["ok"]):
 		result.mark_fail("Editör action geçersiz: " + str(plan["reason"]))
 		return result
 
 	var applier := AIEditorActionApplier.new()
-	var out: Dictionary
+	var output: Dictionary
 	match spec.action_type:
 		AIActionSpec.ActionType.NODE_ADD:
-			out = applier.apply_node_add(plan)
+			output = applier.apply_node_add(plan)
 		AIActionSpec.ActionType.NODE_REMOVE:
-			out = applier.apply_node_remove(plan)
+			output = applier.apply_node_remove(plan)
 		AIActionSpec.ActionType.PROPERTY_SET:
-			out = applier.apply_property_set(plan)
+			output = applier.apply_property_set(plan)
 		AIActionSpec.ActionType.SCRIPT_ATTACH:
-			out = applier.apply_script_attach(plan)
+			output = applier.apply_script_attach(plan)
 		AIActionSpec.ActionType.PROJECT_SETTING:
-			out = applier.apply_project_setting(plan)
+			output = applier.apply_project_setting(plan)
 		_:
 			result.mark_fail("Editör action yönlendirilemedi")
 			return result
 
-	if not bool(out["available"]):
+	if not bool(output["available"]):
 		result.outcome = AIVerificationResult.Outcome.SKIP
-		result.message = (
-			"Editör bağlamı yok — bu işlem Godot editöründe çalışır: %s"
-			% str(out["reason"])
-		)
+		result.message = "Editör bağlamı yok: %s" % output["reason"]
 		return result
-	if bool(out["ok"]):
-		result.mark_pass(
-			{
-				"action": spec.action_type_name(),
-				"detail": str(out["reason"]),
-			},
-			"editor_action"
-		)
-		result.message = str(out["reason"])
-	else:
-		result.mark_fail("Editör uygulaması başarısız: " + str(out["reason"]))
+	if not bool(output["ok"]):
+		result.mark_fail("Editör uygulaması başarısız: " + str(output["reason"]))
+		return result
+
+	result.mark_pass(
+		{
+			"action": spec.action_type_name(),
+			"detail": str(output["reason"]),
+			"undoable": bool(output.get("undoable", false)),
+			"scene_path": str(output.get("scene_path", "")),
+		},
+		"editor_action"
+	)
+	result.message = str(output["reason"])
 	return result
 
 
-# ============================================================
-# GERİ-ALMA
-# ============================================================
-
-## Bir işlemi undo token ile geri alır.
 func undo_operation(undo_token: String) -> Dictionary:
-	var res: Dictionary = _file_op.undo(undo_token)
-	return res
+	return _file_op.undo(undo_token)
 
 
-## En son başarılı işlemi geri alır.
-## Dönen: {ok, error, reverted_path}
 func undo_last() -> Dictionary:
 	var last: AIOperationJournal.OperationRecord = _journal.last_done()
 	if last == null:
 		return {"ok": false, "error": "Geri alınacak işlem yok", "reverted_path": ""}
 	if last.undo_token.is_empty():
-		return {"ok": false, "error": "İşlemin undo token'ı yok", "reverted_path": ""}
-
-	var res: Dictionary = _file_op.undo(last.undo_token)
-	if res["ok"]:
+		return {
+			"ok": false,
+			"error": "İşlemin undo token'ı yok",
+			"reverted_path": "",
+		}
+	var response: Dictionary = _file_op.undo(last.undo_token)
+	if bool(response["ok"]):
 		_journal.mark_reverted(last.id)
 	return {
-		"ok": res["ok"],
-		"error": res["error"],
+		"ok": response["ok"],
+		"error": response["error"],
 		"reverted_path": last.target_path,
 	}
 
 
-## Yeni bir atomik işlem grubu (transaction) oluşturur.
-## Birden çok dosya işlemini all-or-nothing yapmak için kullanılır.
-## Örnek: bir plan 20 dosya yazacak — biri hata verirse hepsi geri alınır.
 func create_batch() -> AITransactionBatch:
 	return AITransactionBatch.new(_file_op)
 
 
-# ============================================================
-# DURUM
-# ============================================================
-
-## Journal'ı diske kaydeder — düzenli aralıklarla + kapanışta çağrılır.
 func persist() -> bool:
 	return _journal.save_to_disk()
 
 
-## Executor durum özeti.
 func stats() -> Dictionary:
 	return {
 		"total_operations": _journal.count(),
@@ -399,5 +384,6 @@ func stats() -> Dictionary:
 		"failed": _journal.records_with_status(AIOperationJournal.OpStatus.FAILED).size(),
 		"pending": _journal.pending_operations().size(),
 		"undo_snapshots": _undo.count(),
+		"pending_destructive_approvals": _approved_destructive_actions.size(),
 		"quota": quota.usage(),
 	}
