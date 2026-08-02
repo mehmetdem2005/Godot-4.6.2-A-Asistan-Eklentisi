@@ -231,11 +231,14 @@ static func _test_no_bridge_fallback() -> Dictionary:
 	var name := "Köprüsüz decompose → dürüst tek görev fallback"
 	var d := _new()
 	var captured: Array = []
-	d.decomposed.connect(func(tasks: Array) -> void:
+	var capture_callback: Callable = func(tasks: Array) -> void:
 		captured.append(tasks)
-	)
+	d.decomposed.connect(capture_callback)
 	var started: bool = d.decompose("envanter sistemli oyun")
+	if d.decomposed.is_connected(capture_callback):
+		d.decomposed.disconnect(capture_callback)
 	d.free()
+	capture_callback = Callable()
 	if started:
 		return _fail(name, "köprüsüz başlamamalı")
 	if captured.is_empty() or captured[0].size() != 1:
