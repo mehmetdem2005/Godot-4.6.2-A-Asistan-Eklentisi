@@ -7,7 +7,7 @@ extends SceneTree
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
 ##
-## Final toplamı altı bağımsız paketten oluşur:
+## Paketler:
 ##   - ana contract paketi
 ##   - mobil hardening
 ##   - gerçek repo Android audit
@@ -15,6 +15,7 @@ extends SceneTree
 ##   - DeepSeek V4 Pro maksimum üretim profili
 ##   - hiyerarşik AAA ajan organizasyonu
 ##   - canlı görev kuyruğu ajan routing entegrasyonu
+##   - ajan mailbox/event/memory/lock coordination runtime
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
@@ -53,6 +54,7 @@ func _execute_validation() -> int:
 	var deepseek_pro_report: Dictionary = AIDeepSeekProMaxTest.build_report()
 	var organization_report: Dictionary = AIAgentOrganizationTest.build_report()
 	var live_routing_report: Dictionary = AILiveAgentRoutingTest.build_report()
+	var coordination_report: Dictionary = AIAgentCoordinationRuntimeTest.build_report()
 	var reports: Array = [
 		core_report,
 		mobile_report,
@@ -61,6 +63,7 @@ func _execute_validation() -> int:
 		deepseek_pro_report,
 		organization_report,
 		live_routing_report,
+		coordination_report,
 	]
 	var failed: int = 0
 	var passed: int = 0
