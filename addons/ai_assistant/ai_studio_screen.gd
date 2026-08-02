@@ -9,6 +9,11 @@ extends Control
 ## bir Control. Ortada SOHBET; "≡ Menü" ile AYARLAR ve 9 sekmelik
 ## WORKSPACE görünümlerine geçilir.
 ##
+## Faz 7: sabit piksel varsayımları AIMobileLayoutPolicy profiline
+## taşındı. 360 px portre, landscape ve editör yeniden boyutlandırması
+## aynı canlı responsive yolu kullanır. Ana etkileşim hedefleri en az
+## 48 mantıksal pikseldir.
+##
 ## Tüm KARAR mantığı AIMainPanelController'da (sahnesiz test edilir).
 ## Bu Control ince görsel kabuk; kodla kurulur (.tscn YOK — proje
 ## disiplini). Gerçek çalıştırma kanıtlanmış AIPipelineOrchestrator
@@ -41,6 +46,13 @@ var _active_view: int = View.CHAT
 var _title_label: Label = null
 var _menu_popup: PopupMenu = null
 
+# Responsive kökler
+var _root_layout: VBoxContainer = null
+var _header_bar: HBoxContainer = null
+var _menu_button: MenuButton = null
+var _body_margin: MarginContainer = null
+var _layout_profile: Dictionary = {}
+
 # Sohbet görünümü
 var _chat_view: Control = null
 var _chat_log: RichTextLabel = null
@@ -50,8 +62,12 @@ var _status_label: Label = null
 
 # Ayarlar görünümü
 var _settings_view: Control = null
+var _settings_column: VBoxContainer = null
+var _key_grid: GridContainer = null
 var _key_edit: LineEdit = null
+var _key_save_btn: Button = null
 var _model_option: OptionButton = null
+var _reset_btn: Button = null
 
 # Görevler görünümü — canlı dinamik görev listesi
 var _tasks_view: Control = null
@@ -71,6 +87,9 @@ func _init() -> void:
 
 func _ready() -> void:
 	_build_ui()
+	if not resized.is_connected(_on_viewport_resized):
+		resized.connect(_on_viewport_resized)
+	_apply_responsive_layout()
 	_apply_view(View.CHAT)
 	_redraw_chat()
 	_refresh_status()
@@ -83,52 +102,53 @@ func _ready() -> void:
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
-	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.add_theme_constant_override("separation", 6)
-	add_child(root)
+	_root_layout = VBoxContainer.new()
+	_root_layout.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root_layout.add_theme_constant_override("separation", 6)
+	add_child(_root_layout)
 
-	root.add_child(_build_header())
+	_root_layout.add_child(_build_header())
 
-	var body := MarginContainer.new()
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("margin_left", 10)
-	body.add_theme_constant_override("margin_right", 10)
-	body.add_theme_constant_override("margin_bottom", 10)
-	root.add_child(body)
+	_body_margin = MarginContainer.new()
+	_body_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body_margin.add_theme_constant_override("margin_left", 10)
+	_body_margin.add_theme_constant_override("margin_right", 10)
+	_body_margin.add_theme_constant_override("margin_bottom", 10)
+	_root_layout.add_child(_body_margin)
 
 	_chat_view = _build_chat_view()
 	_tasks_view = _build_tasks_view()
 	_settings_view = _build_settings_view()
 	_workspace_view = _build_workspace_view()
-	body.add_child(_chat_view)
-	body.add_child(_tasks_view)
-	body.add_child(_settings_view)
-	body.add_child(_workspace_view)
+	_body_margin.add_child(_chat_view)
+	_body_margin.add_child(_tasks_view)
+	_body_margin.add_child(_settings_view)
+	_body_margin.add_child(_workspace_view)
 
 
 func _build_header() -> Control:
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 10)
+	_header_bar = HBoxContainer.new()
+	_header_bar.add_theme_constant_override("separation", 10)
 
-	var menu_btn := MenuButton.new()
-	menu_btn.text = "≡ Menü"
-	menu_btn.flat = false
-	_menu_popup = menu_btn.get_popup()
+	_menu_button = MenuButton.new()
+	_menu_button.text = "≡ Menü"
+	_menu_button.flat = false
+	_menu_popup = _menu_button.get_popup()
 	_menu_popup.add_item("Sohbet", View.CHAT)
 	_menu_popup.add_item("Görevler", View.TASKS)
 	_menu_popup.add_item("Ayarlar", View.SETTINGS)
 	_menu_popup.add_item("Çalışma Alanı (9 Sekme)", View.WORKSPACE)
 	_menu_popup.id_pressed.connect(_on_menu_selected)
-	bar.add_child(menu_btn)
+	_header_bar.add_child(_menu_button)
 
 	_title_label = Label.new()
 	_title_label.text = "AI Asistan — " + str(VIEW_TITLES[View.CHAT])
 	_title_label.add_theme_font_size_override("font_size", 18)
 	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(_title_label)
+	_title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_header_bar.add_child(_title_label)
 
-	return bar
+	return _header_bar
 
 
 func _build_chat_view() -> Control:
@@ -153,7 +173,8 @@ func _build_chat_view() -> Control:
 	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(_chat_log)
 
-	# Giriş + Gönder — en ALTTA. Klavye açılınca OS bu bölgeyi yukarı iter.
+	# Giriş + Gönder — en ALTTA. Klavye açılınca responsive profil bu
+	# bölgenin minimum yüksekliğini landscape/portreye göre sınırlar.
 	_input_edit = TextEdit.new()
 	_input_edit.placeholder_text = (
 		"Ne yapmamı istersin? (Ctrl+Enter ile gönder)"
@@ -174,53 +195,67 @@ func _build_chat_view() -> Control:
 
 
 func _build_settings_view() -> Control:
-	var col := VBoxContainer.new()
-	col.set_anchors_preset(Control.PRESET_FULL_RECT)
-	col.add_theme_constant_override("separation", 10)
+	# Dar portrede ayarlar dikey uzayabilir; ScrollContainer tüm alanlara
+	# klavye açıkken dahi erişimi korur.
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	_settings_column = VBoxContainer.new()
+	_settings_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_settings_column.add_theme_constant_override("separation", 10)
+	scroll.add_child(_settings_column)
 
 	var key_lbl := Label.new()
 	key_lbl.text = "DeepSeek API Anahtarı:"
-	col.add_child(key_lbl)
+	_settings_column.add_child(key_lbl)
 
-	var key_row := HBoxContainer.new()
-	col.add_child(key_row)
+	_key_grid = GridContainer.new()
+	_key_grid.columns = 2
+	_key_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_settings_column.add_child(_key_grid)
+
 	_key_edit = LineEdit.new()
 	_key_edit.secret = true
 	_key_edit.placeholder_text = "sk-..."
 	_key_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	key_row.add_child(_key_edit)
-	var key_btn := Button.new()
-	key_btn.text = "Anahtarı Kaydet"
-	key_btn.pressed.connect(_on_save_key)
-	key_row.add_child(key_btn)
+	_key_grid.add_child(_key_edit)
+
+	_key_save_btn = Button.new()
+	_key_save_btn.text = "Anahtarı Kaydet"
+	_key_save_btn.pressed.connect(_on_save_key)
+	_key_grid.add_child(_key_save_btn)
 
 	var key_hint := Label.new()
 	key_hint.text = (
 		"Anahtarı kaydedince hazır olur — Gönder doğrudan çalışır."
 	)
 	key_hint.add_theme_font_size_override("font_size", 12)
-	col.add_child(key_hint)
+	key_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_settings_column.add_child(key_hint)
 
 	var model_lbl := Label.new()
 	model_lbl.text = "Yapay Zeka Modeli:"
-	col.add_child(model_lbl)
+	_settings_column.add_child(model_lbl)
 	_model_option = OptionButton.new()
+	_model_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for i in AIMainPanelController.ALLOWED_MODELS.size():
 		_model_option.add_item(
 			str(AIMainPanelController.ALLOWED_MODELS[i]), i
 		)
 	_model_option.item_selected.connect(_on_model_selected)
-	col.add_child(_model_option)
+	_settings_column.add_child(_model_option)
 
 	var sys_lbl := Label.new()
 	sys_lbl.text = "Sistem İşlemleri:"
-	col.add_child(sys_lbl)
-	var reset_btn := Button.new()
-	reset_btn.text = "Hafızayı ve Kuyruğu Sıfırla"
-	reset_btn.pressed.connect(_on_reset)
-	col.add_child(reset_btn)
+	_settings_column.add_child(sys_lbl)
+	_reset_btn = Button.new()
+	_reset_btn.text = "Hafızayı ve Kuyruğu Sıfırla"
+	_reset_btn.pressed.connect(_on_reset)
+	_settings_column.add_child(_reset_btn)
 
-	return col
+	return scroll
 
 
 func _build_tasks_view() -> Control:
@@ -297,6 +332,83 @@ func _build_workspace_view() -> Control:
 
 
 # ============================================================
+# RESPONSIVE / ANDROID DÜZEN
+# ============================================================
+
+func _on_viewport_resized() -> void:
+	_apply_responsive_layout()
+
+
+func _current_viewport_size() -> Vector2i:
+	var local_size := Vector2i(int(size.x), int(size.y))
+	if local_size.x > 1 and local_size.y > 1:
+		return local_size
+	return DisplayServer.window_get_size()
+
+
+func _apply_responsive_layout() -> void:
+	if _root_layout == null:
+		return
+	var dpi: int = DisplayServer.screen_get_dpi()
+	if dpi <= 0:
+		dpi = 160
+	_layout_profile = AIMobileLayoutPolicy.profile(
+		_current_viewport_size(), dpi
+	)
+
+	var margin: int = int(_layout_profile["margin"])
+	var separation: int = int(_layout_profile["separation"])
+	var touch: int = int(_layout_profile["touch_target"])
+	var body_font: int = int(_layout_profile["body_font"])
+	var compact: bool = bool(_layout_profile["compact"])
+
+	_root_layout.add_theme_constant_override("separation", separation)
+	_header_bar.add_theme_constant_override("separation", separation)
+	_body_margin.add_theme_constant_override("margin_left", margin)
+	_body_margin.add_theme_constant_override("margin_right", margin)
+	_body_margin.add_theme_constant_override("margin_top", margin)
+	_body_margin.add_theme_constant_override("margin_bottom", margin)
+
+	_title_label.add_theme_font_size_override(
+		"font_size", int(_layout_profile["header_font"])
+	)
+	_status_label.add_theme_font_size_override("font_size", body_font)
+	_menu_button.custom_minimum_size = Vector2(88, touch)
+	_send_btn.custom_minimum_size = Vector2(0, touch)
+	_key_edit.custom_minimum_size = Vector2(0, touch)
+	_key_save_btn.custom_minimum_size = Vector2(0, touch)
+	_model_option.custom_minimum_size = Vector2(0, touch)
+	_reset_btn.custom_minimum_size = Vector2(0, touch)
+
+	_chat_log.custom_minimum_size = Vector2(
+		0, int(_layout_profile["chat_min_height"])
+	)
+	_input_edit.custom_minimum_size = Vector2(
+		0, int(_layout_profile["input_min_height"])
+	)
+	_key_grid.columns = int(_layout_profile["settings_columns"])
+	_key_save_btn.size_flags_horizontal = (
+		Control.SIZE_EXPAND_FILL if compact else Control.SIZE_SHRINK_END
+	)
+	_settings_column.add_theme_constant_override("separation", separation)
+	_update_title()
+
+
+func _update_title() -> void:
+	if _title_label == null:
+		return
+	var view_title: String = str(VIEW_TITLES.get(_active_view, "?"))
+	var title_mode: String = str(_layout_profile.get("title_mode", "full"))
+	_title_label.text = AIMobileLayoutPolicy.title_for(view_title, title_mode)
+	_title_label.visible = not _title_label.text.is_empty()
+
+
+## Son uygulanan saf layout profili — cihaz smoke/debug için.
+func layout_profile() -> Dictionary:
+	return _layout_profile.duplicate(true)
+
+
+# ============================================================
 # GÖRÜNÜM GEÇİŞİ
 # ============================================================
 
@@ -306,8 +418,7 @@ func _on_menu_selected(id: int) -> void:
 
 func _apply_view(view: int) -> void:
 	_active_view = view
-	if _title_label != null:
-		_title_label.text = "AI Asistan — " + str(VIEW_TITLES.get(view, "?"))
+	_update_title()
 	if _chat_view != null:
 		_chat_view.visible = view == View.CHAT
 	if _tasks_view != null:
