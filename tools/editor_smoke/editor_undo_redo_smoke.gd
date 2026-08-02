@@ -9,7 +9,7 @@ extends EditorScript
 ##   1. NODE_ADD
 ##   2. PROPERTY_SET
 ##   3. SCRIPT_ATTACH
-## Her işlem için do -> undo -> redo -> undo zinciri kanıtlanır ve
+## Her işlem için do -> undo -> redo -> cleanup undo zinciri kanıtlanır ve
 ## fixture başlangıç durumuna geri getirilip kaydedilir.
 
 const FIXTURE_SCENE: String = "res://tools/editor_smoke/fixture.tscn"
@@ -20,30 +20,33 @@ const ADDED_PATH: NodePath = NodePath("AddedByAI")
 
 func _run() -> void:
 	print("=== AI Editor Undo/Redo Smoke ===")
+	var result: Dictionary = run_smoke()
+	_finish(bool(result.get("ok", false)), str(result.get("message", "")))
+
+
+## Hem elle çalıştırılan EditorScript hem de CI eklentisi aynı kanıt
+## çekirdeğini kullanır. Sonuç sözlüğü sayesinde CI log metnini tahmin
+## etmek yerine gerçek başarı durumuyla çıkış kodu verebilir.
+func run_smoke() -> Dictionary:
 	if not Engine.is_editor_hint():
-		_finish(false, "Godot editör bağlamı yok")
-		return
+		return _result(false, "Godot editör bağlamı yok", 0, 3)
 
 	var root: Node = EditorInterface.get_edited_scene_root()
 	var fixture_error: String = _fixture_error(root)
 	if not fixture_error.is_empty():
-		_finish(false, fixture_error)
-		return
+		return _result(false, fixture_error, 0, 3)
 
 	var manager: EditorUndoRedoManager = EditorInterface.get_editor_undo_redo()
 	if manager == null:
-		_finish(false, "EditorUndoRedoManager alınamadı")
-		return
+		return _result(false, "EditorUndoRedoManager alınamadı", 0, 3)
 
 	var history_id: int = manager.get_object_history_id(root)
 	if history_id == EditorUndoRedoManager.INVALID_HISTORY:
-		_finish(false, "Fixture için geçerli undo history bulunamadı")
-		return
+		return _result(false, "Fixture için geçerli undo history bulunamadı", 0, 3)
 	manager.clear_history(history_id, false)
 	var history: UndoRedo = manager.get_history_undo_redo(history_id)
 	if history == null:
-		_finish(false, "Fixture UndoRedo nesnesi alınamadı")
-		return
+		return _result(false, "Fixture UndoRedo nesnesi alınamadı", 0, 3)
 
 	var planner := AISceneActionPlanner.new()
 	var applier := AIEditorActionApplier.new()
@@ -53,29 +56,46 @@ func _run() -> void:
 	results.append(_test_script(root, planner, applier, history))
 
 	var passed: int = 0
-	for result in results:
-		if bool(result.get("ok", false)):
+	for test_result in results:
+		if bool(test_result.get("ok", false)):
 			passed += 1
-			print("  ✓ " + str(result.get("name", "")))
+			print("  ✓ " + str(test_result.get("name", "")))
 		else:
 			printerr(
 				"  ✗ %s — %s" % [
-					str(result.get("name", "")),
-					str(result.get("reason", "")),
+					str(test_result.get("name", "")),
+					str(test_result.get("reason", "")),
 				]
 			)
 
 	var final_error: String = _fixture_error(root)
 	if not final_error.is_empty():
-		_finish(false, "Test sonrası fixture başlangıç durumuna dönmedi: " + final_error)
-		return
+		return _result(
+			false,
+			"Test sonrası fixture başlangıç durumuna dönmedi: " + final_error,
+			passed,
+			results.size()
+		)
 
+	# Cleanup undo'ları redo yığını bırakır. Kaydetmeden önce yalnız bu
+	# izole fixture geçmişini temizlemek, Godot'un tutarsız redo geçmişi
+	# tanısını önler ve gerçek oyun sahnelerinin geçmişine dokunmaz.
+	manager.clear_history(history_id, false)
 	var save_error: int = EditorInterface.save_scene()
 	if save_error != OK:
-		_finish(false, "Fixture temizlendi ancak kaydedilemedi: %d" % save_error)
-		return
+		return _result(
+			false,
+			"Fixture temizlendi ancak kaydedilemedi: %d" % save_error,
+			passed,
+			results.size()
+		)
 
-	_finish(passed == results.size(), "%d/%d smoke testi geçti" % [passed, results.size()])
+	return _result(
+		passed == results.size(),
+		"%d/%d smoke testi geçti" % [passed, results.size()],
+		passed,
+		results.size()
+	)
 
 
 func _test_node_add(
@@ -211,6 +231,15 @@ func _finish(ok: bool, message: String) -> void:
 	else:
 		printerr("SMOKE_FAIL: " + message)
 	print("=== Smoke tamamlandı ===")
+
+
+func _result(ok: bool, message: String, passed: int, total: int) -> Dictionary:
+	return {
+		"ok": ok,
+		"message": message,
+		"passed": passed,
+		"total": total,
+	}
 
 
 func _ok(name: String) -> Dictionary:

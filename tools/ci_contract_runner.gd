@@ -7,13 +7,12 @@ extends SceneTree
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
 ##
-## Faz 7 mobil sertleştirme ve gerçek-repo Android audit paketleri ayrı
-## rapor üretir ama ana contract toplamına eklenir. Böylece responsive
-## veya Android yapılandırma regresyonu aynı zorunlu kapıyı kırar.
-##
-## Runtime hygiene: test raporu ve geçici nesneler stack'ten çıktıktan
-## sonra iki process frame beklenir. Böylece queue_free/deferred cleanup
-## işlemleri tamamlanmadan motor zorla kapatılmaz.
+## Final toplamı beş bağımsız paketten oluşur:
+##   - ana contract paketi
+##   - mobil hardening
+##   - gerçek repo Android audit
+##   - release readiness manifest/audit
+##   - DeepSeek V4 Pro maksimum üretim profili
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
@@ -23,14 +22,11 @@ var _planned_exit_code: int = 0
 
 
 func _initialize() -> void:
-	# _initialize içinde doğrudan ağır test + quit yapmak, geçici Resource
-	# referansları hâlâ stack'teyken motoru kapatabilir. Ayrı çağrı scope'u.
 	call_deferred("_run_validation")
 
 
 func _run_validation() -> void:
 	_planned_exit_code = _execute_validation()
-	# Bu fonksiyon döndükten sonra report ve diğer lokaller serbest kalır.
 	call_deferred("_drain_and_quit")
 
 
@@ -50,8 +46,16 @@ func _execute_validation() -> int:
 
 	var core_report: Dictionary = AIContractSelfTest.run_all()
 	var mobile_report: Dictionary = AIMobileHardeningTest.build_report()
-	var repo_report: Dictionary = AIAndroidRepoAuditTest.build_report()
-	var reports: Array = [core_report, mobile_report, repo_report]
+	var android_repo_report: Dictionary = AIAndroidRepoAuditTest.build_report()
+	var release_report: Dictionary = AIReleaseReadinessTest.build_report()
+	var deepseek_pro_report: Dictionary = AIDeepSeekProMaxTest.build_report()
+	var reports: Array = [
+		core_report,
+		mobile_report,
+		android_repo_report,
+		release_report,
+		deepseek_pro_report,
+	]
 	var failed: int = 0
 	var passed: int = 0
 	for report in reports:
@@ -62,6 +66,24 @@ func _execute_validation() -> int:
 		failed += report_failed
 		passed += int(report.get("passed", 0))
 
+	var manifest: Dictionary = _read_release_manifest()
+	var expected_count: int = int(
+		(manifest.get("automatic", {}) as Dictionary).get(
+			"expected_test_count", 0
+		)
+	)
+	if expected_count <= 0:
+		printerr("CI_RELEASE_FAIL: expected_test_count okunamadı")
+		return 23
+	if passed + failed != expected_count:
+		printerr(
+			"CI_RELEASE_FAIL: manifest test sayısı %d, gerçek toplam %d" % [
+				expected_count,
+				passed + failed,
+			]
+		)
+		return 24
+
 	if failed > 0:
 		printerr(
 			"CI_CONTRACT_FAIL: %d test başarısız, %d test geçti" % [
@@ -71,8 +93,23 @@ func _execute_validation() -> int:
 		)
 		return 22
 
+	print("CI_RELEASE_MANIFEST_OK: %d test bekleniyor ve çalıştı" % expected_count)
 	print("CI_CONTRACT_OK: %d test geçti" % passed)
 	return 0
+
+
+func _read_release_manifest() -> Dictionary:
+	var file := FileAccess.open(
+		"res://release/readiness_manifest.json", FileAccess.READ
+	)
+	if file == null:
+		return {}
+	var text: String = file.get_as_text()
+	file.close()
+	var parsed: Variant = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	return parsed
 
 
 func _verify_engine_version() -> Dictionary:

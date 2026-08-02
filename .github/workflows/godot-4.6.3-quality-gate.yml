@@ -36,10 +36,10 @@ jobs:
         run: python3 tools/ci_architecture_gate.py
 
   godot-validation:
-    name: Godot 4.6.3 parse and contract tests
+    name: Godot 4.6.3 parse, editor smoke and contract tests
     needs: static-gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -107,6 +107,90 @@ jobs:
             echo "Parse/compile diagnostics detected during editor import" >&2
             exit 40
           fi
+
+      - name: Ensure virtual desktop is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          command -v xvfb-run
+
+      - name: Run isolated real EditorUndoRedo smoke
+        shell: bash
+        env:
+          AI_EDITOR_SMOKE: "1"
+        run: |
+          set -euo pipefail
+          smoke_dir="${RUNNER_TEMP}/ai-editor-smoke-project"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='ci-logs/' \
+            "${GITHUB_WORKSPACE}/" "${smoke_dir}/"
+
+          set +e
+          timeout 120s xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --editor --path "${smoke_dir}" --quit-after 300 --verbose \
+            --rendering-method gl_compatibility --audio-driver Dummy \
+            2>&1 | tee ci-logs/editor-undo-redo-smoke.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "EditorUndoRedo smoke process failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+          grep -Fq "SMOKE_OK: 3/3 smoke testi geçti" \
+            ci-logs/editor-undo-redo-smoke.log
+          if grep -Fq "SMOKE_FAIL:" ci-logs/editor-undo-redo-smoke.log; then
+            echo "EditorUndoRedo smoke failure marker detected" >&2
+            exit 42
+          fi
+
+          awk '
+            /CI_EDITOR_SMOKE_START/ { capture=1 }
+            capture { print }
+            /CI_EDITOR_SMOKE_DONE/ { exit }
+          ' ci-logs/editor-undo-redo-smoke.log \
+            > ci-logs/editor-undo-redo-window.log
+          grep -Fq "CI_EDITOR_SMOKE_START" ci-logs/editor-undo-redo-window.log
+          grep -Fq "CI_EDITOR_SMOKE_DONE" ci-logs/editor-undo-redo-window.log
+          if grep -En \
+            'ERROR:|SCRIPT ERROR:|Parse Error:|Compile Error:|Inconsistent redo history' \
+            ci-logs/editor-undo-redo-window.log; then
+            echo "EditorUndoRedo smoke emitted in-scope error diagnostics" >&2
+            exit 44
+          fi
+
+          cmp --silent \
+            tools/editor_smoke/fixture.tscn \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn" || {
+              echo "Smoke fixture was not restored byte-for-byte" >&2
+              diff -u \
+                tools/editor_smoke/fixture.tscn \
+                "${smoke_dir}/tools/editor_smoke/fixture.tscn" || true
+              exit 43
+            }
+          if grep -Fq 'AddedByAI' \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn"; then
+            echo "Smoke fixture contains AddedByAI after cleanup" >&2
+            exit 45
+          fi
+          echo "EditorUndoRedo smoke gate passed"
+
+      - name: Verify production project stayed immutable
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- \
+            project.godot \
+            tools/editor_smoke/fixture.tscn \
+            addons/ai_assistant \
+            addons/ai_contract_tests
 
       - name: Run complete contract self-test suite
         shell: bash
