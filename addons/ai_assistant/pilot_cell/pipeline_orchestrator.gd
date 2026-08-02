@@ -48,7 +48,7 @@ var _chat_mode: bool = false
 
 # --- Çok-adımlı plan (Plan C) ---
 var _decomposer: AIPlanDecomposer = null
-var _chain: AIRoleChainRunner = null
+var _chain: AIAdaptiveRoleGraphRunner = null
 var _aux_bridge: AIAgentLiveBridge = null
 var _bp_active: bool = false
 var _bp_goal: String = ""
@@ -378,9 +378,9 @@ func run_chat(
 	return _bridge.think_chat(message, model, history, project_context)
 
 
-## ASENKRON ÇOK-ADIMLI ZİNCİR (Plan C): büyük BUILD isteği →
-## Decomposer (alt görevler) → her görev için çoklu rol hattı
-## (Architect→CodeEngineer→Reviewer) → kod çıkar → SENKRON çekirdek
+## ASENKRON ADAPTİF DÜŞÜNME GRAFİĞİ: büyük BUILD isteği →
+## Decomposer (alt görevler) → her görev için 13–21 bilişsel katman,
+## paralel uzman konseyleri, hipotezler, red-team ve uzlaşma → SENKRON çekirdek
 ## (verify→HITL→Executor) → sıradaki görev. Sonuç 'pipeline_completed'
 ## ile gelir (stage="build_plan"; paths[] + failed_tasks[]).
 ## Kısmi başarısızlık: o görev failed_tasks'e girer, döngü sürer.
@@ -414,8 +414,8 @@ func run_build_plan(
 	_bp_spawned = 0
 	_bp_milestone_id = ""
 
-	# Yardımcı köprü: decomposer + zincir SIRAYLA kullanır (tek köprü,
-	# çakışmasız — decomposer biter, sonra zincir başlar).
+	# Decomposer bu yardımcı köprüyü kullanır. Adaptif runner yalnız
+	# router'ı paylaşır ve her paralel düşünme kolu için ayrı bridge/transport kurar.
 	_aux_bridge = AIAgentLiveBridge.new()
 	add_child(_aux_bridge)
 	_aux_bridge.attach_router(router)
@@ -425,7 +425,7 @@ func run_build_plan(
 	_decomposer.attach_bridge(_aux_bridge)
 	_decomposer.decomposed.connect(_on_decomposed)
 
-	_chain = AIRoleChainRunner.new()
+	_chain = AIAdaptiveRoleGraphRunner.new()
 	add_child(_chain)
 	_chain.attach_bridge(_aux_bridge)
 	_chain.chain_progress.connect(_on_chain_progress)
@@ -562,6 +562,9 @@ func _run_next_task() -> void:
 	var instruction: String = _build_task_instruction(_bp_current)
 	var mode: String = (
 		"repair" if str(_bp_current["kind"]) == "repair" else "full"
+	)
+	pipeline_progress.emit(
+		"Adaptif derin konsey: bağımsız düşünme kolları paralel başlatılıyor"
 	)
 	_chain.run(instruction, _bp_model, mode)
 

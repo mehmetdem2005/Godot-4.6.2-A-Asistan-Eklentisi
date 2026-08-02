@@ -16,6 +16,7 @@ extends SceneTree
 ##   - hiyerarşik AAA ajan organizasyonu
 ##   - canlı görev kuyruğu ajan routing entegrasyonu
 ##   - ajan mailbox/event/memory/lock coordination runtime
+##   - 13–21 katmanlı adaptif paralel deliberation graph
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
@@ -55,6 +56,7 @@ func _execute_validation() -> int:
 	var organization_report: Dictionary = AIAgentOrganizationTest.build_report()
 	var live_routing_report: Dictionary = AILiveAgentRoutingTest.build_report()
 	var coordination_report: Dictionary = AIAgentCoordinationRuntimeTest.build_report()
+	var deep_deliberation_report: Dictionary = AIAdaptiveDeepDeliberationTest.build_report()
 	var reports: Array = [
 		core_report,
 		mobile_report,
@@ -64,6 +66,7 @@ func _execute_validation() -> int:
 		organization_report,
 		live_routing_report,
 		coordination_report,
+		deep_deliberation_report,
 	]
 	var failed: int = 0
 	var passed: int = 0
