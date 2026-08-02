@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Architecture invariants for the privileged editor mutation core.
 
-The test suite verifies behavior. This gate additionally prevents accidental
-reintroduction of broad privileges and editor API anti-patterns before Godot is
-started. It is intentionally narrow: hard failures protect security boundaries;
-size/complexity findings are reported as warnings for planned refactoring.
+The behavioral test suite and this static gate serve different purposes. Hard
+failures protect privileged boundaries. Module-size findings are warnings unless
+they concern production code above the absolute God-class ceiling; test
+registries are intentionally allowed to aggregate many cases.
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ REQUIRED_SNIPPETS: dict[str, tuple[str, ...]] = {
     ),
     "scene_action_planner.gd": (
         "scene_path",
-        "_validate_relative_node_path",
-        "BLOCKED_PROJECT_SETTINGS",
+        "_node_path_error",
+        "FORBIDDEN_PROJECT_SETTINGS",
     ),
 }
 
@@ -66,6 +66,17 @@ def read(path: Path) -> str:
 
 def gdscript_files() -> list[Path]:
     return sorted((ROOT / "addons" / "ai_assistant").rglob("*.gd"))
+
+
+def is_production_module(path: Path) -> bool:
+    relative_parts = path.relative_to(ROOT).parts
+    name = path.name
+    return (
+        not name.startswith("_")
+        and not name.endswith("_test.gd")
+        and "tests" not in relative_parts
+        and "test" not in relative_parts
+    )
 
 
 def main() -> int:
@@ -86,13 +97,17 @@ def main() -> int:
                 failures.append(f"{relative}: {reason}")
 
         lines = text.count("\n") + 1
-        method_count = len(re.findall(r"(?m)^func\s+|^static func\s+", text))
-        if lines > MAX_HARD_LINES:
+        method_count = len(re.findall(r"(?m)^(?:static\s+)?func\s+", text))
+        production = is_production_module(path)
+
+        if production and lines > MAX_HARD_LINES:
             failures.append(
-                f"{relative}: {lines} lines exceeds hard God-class limit {MAX_HARD_LINES}"
+                f"{relative}: {lines} lines exceeds production God-class limit "
+                f"{MAX_HARD_LINES}"
             )
         elif lines > WARN_LINES:
-            warnings.append(f"{relative}: large module ({lines} lines)")
+            kind = "production module" if production else "test/registry module"
+            warnings.append(f"{relative}: large {kind} ({lines} lines)")
 
         if method_count > WARN_METHODS:
             warnings.append(f"{relative}: high method count ({method_count})")
@@ -111,6 +126,9 @@ def main() -> int:
     applier = CORE / "editor_action_applier.gd"
     if applier.is_file():
         text = read(applier)
+        # Direct mutations are permitted only inside private do/undo callback
+        # methods registered with EditorUndoRedoManager. They remain visible as
+        # warnings so reviewers inspect any newly introduced occurrence.
         direct_mutations = (
             "node.set(prop,",
             "node.set_script(res)",
@@ -120,7 +138,8 @@ def main() -> int:
         for snippet in direct_mutations:
             if snippet in text:
                 warnings.append(
-                    f"{applier.relative_to(ROOT)}: inspect direct mutation occurrence: {snippet.strip()}"
+                    f"{applier.relative_to(ROOT)}: inspect direct mutation callback: "
+                    f"{snippet.strip()}"
                 )
 
     if warnings:
