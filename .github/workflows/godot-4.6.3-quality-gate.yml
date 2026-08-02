@@ -112,7 +112,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 240s godot --headless --path . \
+          timeout 240s godot --headless --verbose --path . \
             --script res://tools/ci_contract_runner.gd \
             2>&1 | tee ci-logs/contract-tests.log
 
