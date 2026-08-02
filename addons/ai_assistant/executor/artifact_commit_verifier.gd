@@ -99,7 +99,7 @@ static func _refresh_editor_filesystem(path: String) -> bool:
 	if filesystem == null:
 		return false
 	filesystem.update_file(path)
-	if not filesystem.is_scanning() and not filesystem.is_importing():
+	if not filesystem.is_scanning():
 		filesystem.scan()
 	return true
 
