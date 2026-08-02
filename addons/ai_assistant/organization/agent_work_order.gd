@@ -44,7 +44,11 @@ func validate(chart: AIAgentOrgChart) -> Dictionary:
 			var reviewer := chart.role(reviewer_id)
 			if not reviewer.can_approve:
 				errors.append("denetçi onay yetkili değil: " + reviewer_id)
-	if high_risk and not reviewer_ids.has("security_reviewer"):
+	var security_present: bool = (
+		primary_role_id == "security_reviewer"
+		or reviewer_ids.has("security_reviewer")
+	)
+	if high_risk and not security_present:
 		errors.append("yüksek riskli görev güvenlik incelemesi gerektirir")
 	if not escalation_role_id.is_empty() and not chart.has_role(escalation_role_id):
 		errors.append("escalation rolü yok")
