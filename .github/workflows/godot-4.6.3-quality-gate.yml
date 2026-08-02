@@ -1,0 +1,126 @@
+name: Godot 4.6.3 Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "agent/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: godot-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.6.3"
+  GODOT_TAG: "4.6.3-stable"
+  GODOT_ASSET: "Godot_v4.6.3-stable_linux.x86_64.zip"
+
+jobs:
+  static-gates:
+    name: Security and architecture gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret leakage scan
+        run: python3 tools/ci_security_scan.py
+
+      - name: Architecture invariant scan
+        run: python3 tools/ci_architecture_gate.py
+
+  godot-validation:
+    name: Godot 4.6.3 parse and contract tests
+    needs: static-gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download pinned Godot release and verify digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(curl --fail --silent --show-error --location --retry 3 \
+            "https://api.github.com/repos/godotengine/godot/releases/tags/${GODOT_TAG}")"
+          asset_url="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .browser_download_url' <<<"${release_json}")"
+          asset_digest="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .digest' <<<"${release_json}")"
+
+          if [[ -z "${asset_url}" || "${asset_url}" == "null" ]]; then
+            echo "Godot asset bulunamadı: ${GODOT_ASSET}" >&2
+            exit 30
+          fi
+          if [[ ! "${asset_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Geçerli SHA-256 digest alınamadı: ${asset_digest}" >&2
+            exit 31
+          fi
+
+          curl --fail --silent --show-error --location --retry 3 \
+            "${asset_url}" --output godot.zip
+          echo "${asset_digest#sha256:}  godot.zip" | sha256sum --check --strict
+          unzip -q godot.zip -d "${RUNNER_TEMP}/godot-release"
+
+          binary="${RUNNER_TEMP}/godot-release/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          if [[ ! -f "${binary}" ]]; then
+            echo "Godot binary bulunamadı: ${binary}" >&2
+            exit 32
+          fi
+
+          install -D -m 0755 "${binary}" "${RUNNER_TEMP}/bin/godot"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify exact engine version
+        run: |
+          set -euo pipefail
+          version="$(godot --version)"
+          echo "Godot version: ${version}"
+          [[ "${version}" == 4.6.3.stable* ]]
+
+      - name: Import project and parse editor plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          set +e
+          timeout 90s godot --headless --editor --path . --quit-after 120 --verbose \
+            2>&1 | tee ci-logs/editor-import.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "Godot editor import failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+
+          if grep -En \
+            'SCRIPT ERROR:|Parse Error:|Compile Error:|Failed to load script|Failed to instantiate script' \
+            ci-logs/editor-import.log; then
+            echo "Parse/compile diagnostics detected during editor import" >&2
+            exit 40
+          fi
+
+      - name: Run complete contract self-test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s godot --headless --path . \
+            --script res://tools/ci_contract_runner.gd \
+            2>&1 | tee ci-logs/contract-tests.log
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-4.6.3-quality-gate-logs
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 14
