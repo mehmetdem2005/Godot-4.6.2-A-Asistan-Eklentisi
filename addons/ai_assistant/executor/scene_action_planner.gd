@@ -8,6 +8,8 @@ extends RefCounted
 ## editör köprüsünün güvenle uygulayabileceği dar ve doğrulanmış bir
 ## plana çevirir. Geçersiz girişlerde işlem yapılmaz; açık hata döner.
 
+const ACTIVE_EDITED_SCENE_TARGET: String = "@edited_scene"
+const LEGACY_ACTIVE_EDITED_SCENE_TARGET: String = "(editor)"
 const BAD_NAME_CHARS: Array[String] = ["/", ":", "@", "\"", "%"]
 const FORBIDDEN_PROJECT_SETTINGS: Array[String] = [
 	"editor_plugins/enabled",
@@ -158,9 +160,21 @@ func plan_for(action_type: int, params: Dictionary) -> Dictionary:
 
 func _validate_scene_path(params: Dictionary) -> Dictionary:
 	var scene_path: String = str(params.get("scene_path", "")).strip_edges()
+	# Eski editör direktifleri '(editor)' sentineli kullanıyordu. Bu
+	# değeri serbest bir yol gibi kabul etmek yerine açık ve tipli bir
+	# aktif-sahne hedefi sözleşmesine yükseltiriz. Canlı köprü, yalnız
+	# kullanıcının editörde açık tuttuğu KAYITLI sahneyi hedefleyebilir.
+	if scene_path == LEGACY_ACTIVE_EDITED_SCENE_TARGET:
+		scene_path = ACTIVE_EDITED_SCENE_TARGET
+	if scene_path == ACTIVE_EDITED_SCENE_TARGET:
+		return {
+			"ok": true,
+			"reason": "",
+			"scene_path": ACTIVE_EDITED_SCENE_TARGET,
+		}
 	# Doğrudan planner birim testleri ve eski kayıtların okunması için boş
-	# değer kabul edilir. Executor canlı işlemde ActionSpec.target_path'i
-	# zorunlu olarak buraya enjekte eder.
+	# değer kabul edilir. Canlı editör uygulayıcısı boş hedefi mutasyon için
+	# kabul etmez; executor normal akışta ActionSpec.target_path'i enjekte eder.
 	if scene_path.is_empty():
 		return {"ok": true, "reason": "", "scene_path": ""}
 	if not scene_path.begins_with("res://"):
