@@ -7,17 +7,12 @@ extends Control
 ## Sistemin GÖRÜNEN yüzü. 9 sekmeli Task Workspace. Bu sınıf bir
 ## Control node'u — sahneye eklenir, gözle görülür.
 ##
-## ÖNEMLİ:
-##   UI programatik kurulur (kodla, _build_ui'de) — .tscn elle
-##   düzenlemek yerine. Mobilde bu daha güvenli ve DPI-aware ayar
-##   kolay. Test panelinde DOĞRULANMAZ — UI gözle, telefonda görülür.
+## Faz 7: sekme çubuğu ve içerik alanı AIMobileLayoutPolicy ile canlı
+## yeniden boyutlandırılır. Dar Android ekranında sekmeler kayar ve sekme
+## çubuğu en az 48 mantıksal piksel dokunmatik yüksekliği korur.
 ##
-##   UI'ın ALTINDAKİ MANTIK ayrı RefCounted modellerde:
-##   AIWorkspaceState, AIKanbanModel, AILiveFeedModel, AIIterationModel.
-##   O modeller test edilir; bu panel onları çizer.
-##
-## Bu sürüm çekirdek 3 sekmeyi (Kanban, Live Feed, Iteration) +
-## sekme altyapısını kurar. Kalan 6 sekme sonraki UI oturumuna.
+## UI'ın ALTINDAKİ MANTIK ayrı RefCounted modellerde:
+## AIWorkspaceState, AIKanbanModel, AILiveFeedModel, AIIterationModel.
 
 ## Mantık modelleri — UI bunları okuyup çizer.
 var state: AIWorkspaceState
@@ -26,11 +21,13 @@ var live_feed: AILiveFeedModel
 var iteration: AIIterationModel
 
 ## UI kök düğümleri.
+var _root_layout: VBoxContainer = null
 var _tab_bar: TabBar = null
 var _content_area: VBoxContainer = null
 
 ## Hesaplanan UI ölçeği (DPI-aware).
 var _ui_scale: float = 1.0
+var _layout_profile: Dictionary = {}
 
 
 func _init() -> void:
@@ -41,11 +38,10 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	# Ekran boyutuna göre DPI-aware ölçek
-	var screen_size: Vector2i = DisplayServer.window_get_size()
-	var dpi: int = DisplayServer.screen_get_dpi()
-	_ui_scale = state.compute_ui_scale(screen_size.x, dpi)
 	_build_ui()
+	if not resized.is_connected(_on_resized):
+		resized.connect(_on_resized)
+	_apply_mobile_layout()
 	_refresh_active_tab()
 
 
@@ -57,29 +53,68 @@ func _ready() -> void:
 func _build_ui() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
-	var root := VBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(root)
+	_root_layout = VBoxContainer.new()
+	_root_layout.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_root_layout)
 
 	# --- Sekme çubuğu ---
 	_tab_bar = TabBar.new()
 	for tab_info in state.all_tabs():
 		_tab_bar.add_tab(tab_info["name"])
 	_tab_bar.tab_changed.connect(_on_tab_changed)
-	# Dar ekranda sekmeler kayar
-	var screen_w: int = DisplayServer.window_get_size().x
-	if state.tabs_need_scroll(screen_w):
-		_tab_bar.scrolling_enabled = true
-	root.add_child(_tab_bar)
+	_root_layout.add_child(_tab_bar)
 
 	# --- İçerik alanı ---
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(scroll)
+	_root_layout.add_child(scroll)
 
 	_content_area = VBoxContainer.new()
 	_content_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_content_area)
+
+
+# ============================================================
+# RESPONSIVE / ANDROID DÜZEN
+# ============================================================
+
+func _on_resized() -> void:
+	_apply_mobile_layout()
+
+
+func _panel_size() -> Vector2i:
+	var local_size := Vector2i(int(size.x), int(size.y))
+	if local_size.x > 1 and local_size.y > 1:
+		return local_size
+	return DisplayServer.window_get_size()
+
+
+func _apply_mobile_layout() -> void:
+	if _tab_bar == null:
+		return
+	var dpi: int = DisplayServer.screen_get_dpi()
+	if dpi <= 0:
+		dpi = 160
+	_layout_profile = AIMobileLayoutPolicy.profile(_panel_size(), dpi)
+	_ui_scale = float(_layout_profile["ui_scale"])
+	_root_layout.add_theme_constant_override(
+		"separation", int(_layout_profile["separation"])
+	)
+	_content_area.add_theme_constant_override(
+		"separation", int(_layout_profile["separation"])
+	)
+	_tab_bar.custom_minimum_size = Vector2(
+		0, int(_layout_profile["workspace_tab_height"])
+	)
+	_tab_bar.scrolling_enabled = bool(_layout_profile["workspace_scroll"])
+	_tab_bar.add_theme_font_size_override(
+		"font_size", int(_layout_profile["body_font"])
+	)
+
+
+## Son responsive profil — cihaz smoke/debug için.
+func layout_profile() -> Dictionary:
+	return _layout_profile.duplicate(true)
 
 
 ## Aktif sekme değişince çağrılır.
@@ -140,6 +175,7 @@ func _render_live_feed() -> void:
 	for event in live_feed.recent_visible(30):
 		var row := Label.new()
 		row.text = (event as AIFeedEvent).format_line()
+		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_content_area.add_child(row)
 
 
@@ -153,6 +189,7 @@ func _render_iteration() -> void:
 
 	var goal := Label.new()
 	goal.text = "Hedef: " + iteration.goal
+	goal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_content_area.add_child(goal)
 
 	var prog := Label.new()
@@ -169,6 +206,7 @@ func _render_placeholder() -> void:
 	label.text = "'%s' sekmesi sonraki UI oturumunda gelecek." % (
 		state.active_tab_name()
 	)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_content_area.add_child(label)
 
 

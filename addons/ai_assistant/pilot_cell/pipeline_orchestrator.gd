@@ -39,6 +39,8 @@ var _verifier: AIVerifierEngine = null
 var _hitl: AIHITLCoordinator = null
 var _executor: AIExecutorEngine = null
 var _planner: AIHierarchicalPlanner = null
+var _org_chart: AIAgentOrgChart = null
+var _task_router: AIAgentTaskRouter = null
 
 var _active_path: String = ""
 var _active_role_name: String = ""
@@ -46,7 +48,7 @@ var _chat_mode: bool = false
 
 # --- Çok-adımlı plan (Plan C) ---
 var _decomposer: AIPlanDecomposer = null
-var _chain: AIRoleChainRunner = null
+var _chain: AIAdaptiveRoleGraphRunner = null
 var _aux_bridge: AIAgentLiveBridge = null
 var _bp_active: bool = false
 var _bp_goal: String = ""
@@ -70,6 +72,8 @@ func _init() -> void:
 	_hitl = AIHITLCoordinator.new()
 	_executor = AIExecutorEngine.new()
 	_planner = AIHierarchicalPlanner.new()
+	_org_chart = AIAgentOrgChart.new()
+	_task_router = AIAgentTaskRouter.new(_org_chart)
 
 
 ## Canlı köprüyü bağlar (router'ı ayarlı bir AIAgentLiveBridge).
@@ -374,9 +378,9 @@ func run_chat(
 	return _bridge.think_chat(message, model, history, project_context)
 
 
-## ASENKRON ÇOK-ADIMLI ZİNCİR (Plan C): büyük BUILD isteği →
-## Decomposer (alt görevler) → her görev için çoklu rol hattı
-## (Architect→CodeEngineer→Reviewer) → kod çıkar → SENKRON çekirdek
+## ASENKRON ADAPTİF DÜŞÜNME GRAFİĞİ: büyük BUILD isteği →
+## Decomposer (alt görevler) → her görev için 13–21 bilişsel katman,
+## paralel uzman konseyleri, hipotezler, red-team ve uzlaşma → SENKRON çekirdek
 ## (verify→HITL→Executor) → sıradaki görev. Sonuç 'pipeline_completed'
 ## ile gelir (stage="build_plan"; paths[] + failed_tasks[]).
 ## Kısmi başarısızlık: o görev failed_tasks'e girer, döngü sürer.
@@ -410,8 +414,8 @@ func run_build_plan(
 	_bp_spawned = 0
 	_bp_milestone_id = ""
 
-	# Yardımcı köprü: decomposer + zincir SIRAYLA kullanır (tek köprü,
-	# çakışmasız — decomposer biter, sonra zincir başlar).
+	# Decomposer bu yardımcı köprüyü kullanır. Adaptif runner yalnız
+	# router'ı paylaşır ve her paralel düşünme kolu için ayrı bridge/transport kurar.
 	_aux_bridge = AIAgentLiveBridge.new()
 	add_child(_aux_bridge)
 	_aux_bridge.attach_router(router)
@@ -421,7 +425,7 @@ func run_build_plan(
 	_decomposer.attach_bridge(_aux_bridge)
 	_decomposer.decomposed.connect(_on_decomposed)
 
-	_chain = AIRoleChainRunner.new()
+	_chain = AIAdaptiveRoleGraphRunner.new()
 	add_child(_chain)
 	_chain.attach_bridge(_aux_bridge)
 	_chain.chain_progress.connect(_on_chain_progress)
@@ -455,6 +459,60 @@ func _on_decomposed(tasks: Array) -> void:
 	_run_next_task()
 
 
+func _prepare_task_assignment(
+	task_id: int, title: String, target: String, kind: String,
+	attempt: int, error: String, failed_code: String
+) -> Dictionary:
+	var description: String = _bp_goal
+	if kind == "repair":
+		description = "Onarım: %s\n%s" % [error, failed_code.left(2000)]
+	var work_order: AIAgentWorkOrder = _task_router.route({
+		"id": str(task_id),
+		"title": title,
+		"description": description,
+		"target_file": target,
+	})
+	var validation: Dictionary = work_order.validate(_org_chart)
+	if not bool(validation.get("ok", false)):
+		return {
+			"ok": false,
+			"error": "WorkOrder doğrulanamadı: " + str(validation.get("errors", [])),
+		}
+	var primary: AIAgentRoleProfile = _org_chart.role(work_order.primary_role_id)
+	if primary == null:
+		return {"ok": false, "error": "Birincil ajan rolü bulunamadı"}
+	var entry: Dictionary = {
+		"id": task_id,
+		"title": title,
+		"target_file": target,
+		"kind": kind,
+		"attempt": attempt,
+		"status": "bekliyor",
+		"error": error,
+		"failed_code": failed_code,
+		"primary_role_id": work_order.primary_role_id,
+		"primary_role_title": primary.title,
+		"department": work_order.department,
+		"reviewer_ids": Array(work_order.reviewer_ids),
+		"escalation_role_id": work_order.escalation_role_id,
+		"assignment_confidence": work_order.confidence,
+		"assignment_rationale": work_order.rationale,
+		"high_risk": work_order.high_risk,
+		"work_order": work_order.to_dict(),
+		"work_order_context": work_order.prompt_context(_org_chart),
+	}
+	return {"ok": true, "entry": entry, "planner_role": primary.title}
+
+
+## Salt-okunur görev yönlendirme önizlemesi — UI/test/diagnostics.
+func route_task_preview(task: Dictionary) -> Dictionary:
+	return _task_router.route(task).to_dict()
+
+
+func organization_chart() -> AIAgentOrgChart:
+	return _org_chart
+
+
 ## Bir görevi planner ağacına + kuyruğa + registry'ye ekler.
 ## Dönen: eklendi mi (toplam üst sınır aşılırsa false — kaçak koruma).
 func _enqueue_task(
@@ -463,22 +521,20 @@ func _enqueue_task(
 ) -> bool:
 	if _bp_seq >= MAX_TOTAL_TASKS:
 		return false
-	_bp_seq += 1
+	var next_id: int = _bp_seq + 1
+	var prepared: Dictionary = _prepare_task_assignment(
+		next_id, title, target, kind, attempt, error, failed_code
+	)
+	if not bool(prepared.get("ok", false)):
+		push_error("PipelineOrchestrator: " + str(prepared.get("error", "WorkOrder hatası")))
+		return false
+	_bp_seq = next_id
+	var entry: Dictionary = prepared["entry"]
 	var node: AIPlanNode = _planner.add_task(
-		title, _bp_milestone_id, "CodeEngineer"
+		title, _bp_milestone_id, str(prepared["planner_role"])
 	)
 	_planner.add_action("Yaz: " + target, node.id)
-	var entry: Dictionary = {
-		"id": _bp_seq,
-		"title": title,
-		"target_file": target,
-		"kind": kind,
-		"attempt": attempt,
-		"status": "bekliyor",
-		"error": error,
-		"failed_code": failed_code,
-		"node_id": node.id,
-	}
+	entry["node_id"] = node.id
 	_bp_registry.append(entry)
 	_bp_queue.append(entry)
 	return true
@@ -498,11 +554,17 @@ func _run_next_task() -> void:
 		label = "Onarım %d/%d: %s" % [
 			int(_bp_current["id"]), total, str(_bp_current["title"])
 		]
+	var assigned_title: String = str(_bp_current.get("primary_role_title", ""))
+	if not assigned_title.is_empty():
+		label = "[%s] %s" % [assigned_title, label]
 	pipeline_progress.emit(label)
 	_emit_tasks()
 	var instruction: String = _build_task_instruction(_bp_current)
 	var mode: String = (
 		"repair" if str(_bp_current["kind"]) == "repair" else "full"
+	)
+	pipeline_progress.emit(
+		"Adaptif derin konsey: bağımsız düşünme kolları paralel başlatılıyor"
 	)
 	_chain.run(instruction, _bp_model, mode)
 
@@ -549,6 +611,9 @@ func _build_task_instruction(t: Dictionary) -> String:
 				+ "GDScript üret; markdown kod bloğunda ver, açıklama "
 				+ "yazma."
 			)
+	var org_context: String = str(t.get("work_order_context", "")).strip_edges()
+	if not org_context.is_empty():
+		instruction = org_context + "\n\n" + instruction
 	if not _bp_classes.is_empty():
 		instruction += (
 			"\n\nZATEN ÜRETİLEN SINIFLAR (atıf gerekiyorsa BU gerçek "
@@ -571,6 +636,14 @@ func task_registry() -> Array:
 			"attempt": int(e["attempt"]),
 			"status": str(e["status"]),
 			"error": str(e["error"]),
+			"primary_role_id": str(e.get("primary_role_id", "")),
+			"primary_role_title": str(e.get("primary_role_title", "")),
+			"department": str(e.get("department", "")),
+			"reviewer_ids": (e.get("reviewer_ids", []) as Array).duplicate(),
+			"escalation_role_id": str(e.get("escalation_role_id", "")),
+			"assignment_confidence": float(e.get("assignment_confidence", 0.0)),
+			"assignment_rationale": str(e.get("assignment_rationale", "")),
+			"high_risk": bool(e.get("high_risk", false)),
 		})
 	return out
 
@@ -613,9 +686,11 @@ func _on_chain_completed(res: Dictionary) -> void:
 	if str(t["kind"]) != "repair":
 		_spawn_from_architect(res)
 	if bool(res.get("ok", false)):
+		var actor_role: String = str(t.get(
+			"primary_role_title", res.get("role_name", "CodeEngineer")
+		))
 		var applied: Dictionary = _dispatch_output(
-			str(t["target_file"]), str(res.get("content", "")),
-			str(res.get("role_name", "CodeEngineer"))
+			str(t["target_file"]), str(res.get("content", "")), actor_role
 		)
 		if bool(applied.get("needs_approval", false)):
 			t["status"] = "onay-bekliyor"
@@ -784,6 +859,8 @@ func pipeline_status() -> Dictionary:
 	return {
 		"bridge_attached": _bridge != null,
 		"plan_progress": _planner.progress(),
+		"organization_roles": _org_chart.role_count(),
+		"organization_valid": bool(_org_chart.validate().get("ok", false)),
 	}
 
 

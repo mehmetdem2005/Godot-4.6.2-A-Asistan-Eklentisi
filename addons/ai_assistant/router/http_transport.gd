@@ -4,67 +4,36 @@ extends Node
 
 ## HTTPTransport — gerçek HTTP taşıma katmanı (Layer 7).
 ##
-## Bu sınıf sistemin GERÇEKTEN ağa çıktığı tek nokta. Godot'un
-## HTTPRequest node'unu sarmalar.
-##
-## ÖNEMLİ MİMARİ NOTU:
-##   HTTPRequest bir Node'dur (RefCounted değil) — sahne ağacına
-##   eklenmesi gerekir. Bu yüzden HTTPTransport da Node'dur. Sistemin
-##   geri kalanı RefCounted; bu sınıf köprüdür.
-##
-##   Kullanım: bir sahne/autoload bu node'u ağaca ekler, sonra
-##   send_request() çağrılır. Yanıt 'request_finished' sinyali ile gelir.
-##
-## API ANAHTARI: Bu sınıf anahtarı SAKLAMAZ. Her çağrıda dışarıdan
-## alır (anahtar yönetimi ayrı bir güvenlik katmanının işi). Anahtar
-## boşsa istek yine gönderilir ama sağlayıcı 401 döner — bu beklenen
-## davranıştır, sahte başarı yok.
-##
-## DRY-RUN: dry_run=true iken gerçek ağ çağrısı YAPILMAZ; istek
-## detayları döndürülür. Test ve anahtarsız geliştirme için.
+## DeepSeek V4 Pro 384K çıktı profili uzun sürebilir ve büyük bir JSON
+## gövdesi döndürebilir. Taşıyıcı bu nedenle kısa sohbet varsayımlarına
+## değil, uzun üretim profiline göre yapılandırılır. Anahtar hiçbir zaman
+## burada saklanmaz; her çağrıda yalnız header olarak alınır.
 
-## Gerçek ağ çağrısı yapılsın mı? false = dry-run (istek hazırlanır,
-## gönderilmez). API anahtarı + gerçek ortam hazır olunca true yapılır.
+const LONG_REQUEST_TIMEOUT_SECONDS: float = 1800.0
+const MAX_RESPONSE_BODY_BYTES: int = 64 * 1024 * 1024
+const DOWNLOAD_CHUNK_BYTES: int = 256 * 1024
+
 var live_mode: bool = false
+var timeout_seconds: float = LONG_REQUEST_TIMEOUT_SECONDS
 
-## Zaman aşımı (saniye).
-var timeout_seconds: float = 30.0
-
-## İç HTTPRequest node'u — _ready'de oluşturulur.
 var _http: HTTPRequest = null
-
-## Devam eden bir istek var mı (aynı anda tek istek).
 var _busy: bool = false
-
-## Aktif isteğin tamamlanınca çağrılacak callback'i.
 var _pending_callback: Callable
-
-## Aktif istek başlangıç zamanı (latency hesabı).
 var _request_start_ms: int = 0
-
-## Son dry-run isteğinin detayı (test/inceleme için).
 var last_dry_run: Dictionary = {}
 
 
 func _ready() -> void:
 	_http = HTTPRequest.new()
 	_http.timeout = timeout_seconds
+	_http.body_size_limit = MAX_RESPONSE_BODY_BYTES
+	_http.download_chunk_size = DOWNLOAD_CHUNK_BYTES
+	_http.accept_gzip = true
+	_http.use_threads = true
 	add_child(_http)
 	_http.request_completed.connect(_on_request_completed)
 
 
-# ============================================================
-# İSTEK GÖNDERME
-# ============================================================
-
-## Bir HTTP POST isteği gönderir.
-## url: tam endpoint. headers: HTTP başlıkları. body: JSON gövde (Dictionary).
-## callback: tamamlanınca {ok, status, json, error, latency_ms} ile çağrılır.
-##
-## live_mode=false ise GERÇEK ÇAĞRI YAPILMAZ — istek detayı last_dry_run'a
-## yazılır, callback dry-run sonucuyla çağrılır.
-##
-## Dönen: istek başlatıldı mı (false = meşgul veya hata).
 func send_post(
 	url: String, headers: PackedStringArray, body: Dictionary, callback: Callable
 ) -> bool:
@@ -74,18 +43,19 @@ func send_post(
 	if url.strip_edges().is_empty():
 		push_warning("HTTPTransport: URL boş")
 		return false
+	if not url.begins_with("https://"):
+		push_warning("HTTPTransport: üretim isteği HTTPS olmalı")
+		return false
 
 	var body_json: String = JSON.stringify(body)
 
-	# --- DRY-RUN: gerçek çağrı yapma ---
 	if not live_mode:
 		last_dry_run = {
 			"url": url,
-			"headers": headers,
+			"headers": _redacted_headers(headers),
 			"body": body,
 			"body_json": body_json,
 		}
-		# Dry-run sonucu — açıkça "gönderilmedi" der, sahte başarı yok
 		if callback.is_valid():
 			callback.call({
 				"ok": false,
@@ -98,7 +68,6 @@ func send_post(
 			})
 		return true
 
-	# --- LIVE: gerçek ağ çağrısı ---
 	if _http == null:
 		push_error("HTTPTransport: HTTPRequest hazır değil (node ağaçta mı?)")
 		return false
@@ -125,7 +94,6 @@ func send_post(
 	return true
 
 
-## İstek tamamlandığında HTTPRequest'in çağırdığı iç handler.
 func _on_request_completed(
 	result: int, response_code: int,
 	_headers: PackedStringArray, body: PackedByteArray
@@ -133,7 +101,6 @@ func _on_request_completed(
 	_busy = false
 	var latency: int = Time.get_ticks_msec() - _request_start_ms
 
-	# result — Godot'un HTTPRequest.Result enum'u (ağ seviyesi)
 	if result != HTTPRequest.RESULT_SUCCESS:
 		if _pending_callback.is_valid():
 			_pending_callback.call({
@@ -146,14 +113,12 @@ func _on_request_completed(
 			})
 		return
 
-	# Gövdeyi JSON olarak ayrıştır
 	var text: String = body.get_string_from_utf8()
 	var parsed: Variant = JSON.parse_string(text)
 	var json_data: Dictionary = {}
 	if parsed is Dictionary:
 		json_data = parsed
 	elif parsed == null:
-		# JSON ayrıştırılamadı — yine de status'u ilet
 		if _pending_callback.is_valid():
 			_pending_callback.call({
 				"ok": false,
@@ -165,7 +130,6 @@ func _on_request_completed(
 			})
 		return
 
-	# Başarılı — HTTP status'a göre ok belirlenir
 	var is_ok: bool = response_code >= 200 and response_code < 300
 	if _pending_callback.is_valid():
 		_pending_callback.call({
@@ -178,7 +142,18 @@ func _on_request_completed(
 		})
 
 
-## HTTPRequest.Result kodunu insan-okunur metne çevirir.
+## Dry-run tanısı API anahtarını bellekteki sonuç sözlüğüne bile yazmaz.
+func _redacted_headers(headers: PackedStringArray) -> PackedStringArray:
+	var safe := PackedStringArray()
+	for header in headers:
+		var text: String = str(header)
+		if text.to_lower().begins_with("authorization:"):
+			safe.append("Authorization: [REDACTED]")
+		else:
+			safe.append(text)
+	return safe
+
+
 func _result_error_text(result: int) -> String:
 	match result:
 		HTTPRequest.RESULT_TIMEOUT:
@@ -191,10 +166,24 @@ func _result_error_text(result: int) -> String:
 			return "Bağlantı hatası"
 		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
 			return "TLS/SSL el sıkışma hatası"
+		HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED:
+			return "Yanıt güvenli gövde boyutu limitini aştı"
+		HTTPRequest.RESULT_NO_RESPONSE:
+			return "Sunucudan yanıt alınamadı"
 		_:
 			return "Ağ hatası (result kodu %d)" % result
 
 
-## Şu an bir istek devam ediyor mu?
 func is_busy() -> bool:
 	return _busy
+
+
+func transport_profile() -> Dictionary:
+	return {
+		"timeout_seconds": timeout_seconds,
+		"max_response_body_bytes": MAX_RESPONSE_BODY_BYTES,
+		"download_chunk_bytes": DOWNLOAD_CHUNK_BYTES,
+		"gzip": true,
+		"threaded": true,
+		"https_only": true,
+	}

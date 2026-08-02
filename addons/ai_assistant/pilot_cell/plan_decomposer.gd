@@ -20,6 +20,10 @@ extends Node
 ## (path traversal / kök dışı imkânsız). Var olan dosya ASLA ezilmez —
 ## çakışan ad _2, _3… ile benzersizleştirilir (AAA: üretilen kod elle
 ## yazılan kodu bozmaz).
+##
+## Yaşam döngüsü: köprü sinyali dış sahipliktir. Node yanıt gelmeden
+## silinirse bridge üzerindeki callable açık bırakılmaz; PREDELETE
+## teardown bağlantıyı koparır ve kaynak döngüsünü engeller.
 
 signal decomposed(tasks: Array)
 
@@ -42,8 +46,16 @@ var _bridge: AIAgentLiveBridge = null
 var _instruction: String = ""
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_disconnect_bridge()
+
+
 ## Köprüyü bağlar (orkestratörün anahtarlı router'ını paylaşan).
 func attach_bridge(bridge: AIAgentLiveBridge) -> void:
+	if _bridge == bridge:
+		return
+	_disconnect_bridge()
 	_bridge = bridge
 
 
@@ -66,8 +78,7 @@ func decompose(
 
 
 func _on_thought(thought: Dictionary) -> void:
-	if _bridge.thought_completed.is_connected(_on_thought):
-		_bridge.thought_completed.disconnect(_on_thought)
+	_disconnect_bridge_signal()
 	if not bool(thought.get("ok", false)):
 		# Planlama çağrısı düştü — istek tek adım olarak sürdürülür.
 		decomposed.emit([_fallback(_instruction)])
@@ -75,6 +86,20 @@ func _on_thought(thought: Dictionary) -> void:
 	decomposed.emit(
 		parse_plan(str(thought.get("content", "")), _instruction)
 	)
+
+
+func _disconnect_bridge_signal() -> void:
+	if (
+		_bridge != null
+		and is_instance_valid(_bridge)
+		and _bridge.thought_completed.is_connected(_on_thought)
+	):
+		_bridge.thought_completed.disconnect(_on_thought)
+
+
+func _disconnect_bridge() -> void:
+	_disconnect_bridge_signal()
+	_bridge = null
 
 
 ## Modele verilen planlama yönergesi — yalnız JSON dizi istenir.

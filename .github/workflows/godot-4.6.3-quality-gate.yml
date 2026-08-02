@@ -1,0 +1,277 @@
+name: Godot 4.6.3 Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "agent/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: godot-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.6.3"
+  GODOT_TAG: "4.6.3-stable"
+  GODOT_ASSET: "Godot_v4.6.3-stable_linux.x86_64.zip"
+
+jobs:
+  static-gates:
+    name: Security and architecture gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret leakage scan
+        run: python3 tools/ci_security_scan.py
+
+      - name: Architecture invariant scan
+        run: python3 tools/ci_architecture_gate.py
+
+  godot-validation:
+    name: Godot 4.6.3 parse, editor smoke and contract tests
+    needs: static-gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download pinned Godot release and verify digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(curl --fail --silent --show-error --location --retry 3 \
+            "https://api.github.com/repos/godotengine/godot/releases/tags/${GODOT_TAG}")"
+          asset_url="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .browser_download_url' <<<"${release_json}")"
+          asset_digest="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .digest' <<<"${release_json}")"
+
+          if [[ -z "${asset_url}" || "${asset_url}" == "null" ]]; then
+            echo "Godot asset bulunamadı: ${GODOT_ASSET}" >&2
+            exit 30
+          fi
+          if [[ ! "${asset_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Geçerli SHA-256 digest alınamadı: ${asset_digest}" >&2
+            exit 31
+          fi
+
+          curl --fail --silent --show-error --location --retry 3 \
+            "${asset_url}" --output godot.zip
+          echo "${asset_digest#sha256:}  godot.zip" | sha256sum --check --strict
+          unzip -q godot.zip -d "${RUNNER_TEMP}/godot-release"
+
+          binary="${RUNNER_TEMP}/godot-release/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          if [[ ! -f "${binary}" ]]; then
+            echo "Godot binary bulunamadı: ${binary}" >&2
+            exit 32
+          fi
+
+          install -D -m 0755 "${binary}" "${RUNNER_TEMP}/bin/godot"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify exact engine version
+        run: |
+          set -euo pipefail
+          version="$(godot --version)"
+          echo "Godot version: ${version}"
+          [[ "${version}" == 4.6.3.stable* ]]
+
+      - name: Import project and parse editor plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          set +e
+          timeout 90s godot --headless --editor --path . --quit-after 120 --verbose \
+            2>&1 | tee ci-logs/editor-import.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "Godot editor import failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+
+          if grep -En \
+            'SCRIPT ERROR:|Parse Error:|Compile Error:|Failed to load script|Failed to instantiate script' \
+            ci-logs/editor-import.log; then
+            echo "Parse/compile diagnostics detected during editor import" >&2
+            exit 40
+          fi
+
+      - name: Ensure virtual desktop is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          command -v xvfb-run
+
+      - name: Run isolated real EditorUndoRedo smoke
+        shell: bash
+        env:
+          AI_EDITOR_SMOKE: "1"
+        run: |
+          set -euo pipefail
+          smoke_dir="${RUNNER_TEMP}/ai-editor-smoke-project"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='ci-logs/' \
+            "${GITHUB_WORKSPACE}/" "${smoke_dir}/"
+
+          set +e
+          timeout 120s xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --editor --path "${smoke_dir}" --quit-after 300 --verbose \
+            --rendering-method gl_compatibility --audio-driver Dummy \
+            2>&1 | tee ci-logs/editor-undo-redo-smoke.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "EditorUndoRedo smoke process failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+          grep -Fq "SMOKE_OK: 3/3 smoke testi geçti" \
+            ci-logs/editor-undo-redo-smoke.log
+          if grep -Fq "SMOKE_FAIL:" ci-logs/editor-undo-redo-smoke.log; then
+            echo "EditorUndoRedo smoke failure marker detected" >&2
+            exit 42
+          fi
+
+          awk '
+            /CI_EDITOR_SMOKE_START/ { capture=1 }
+            capture { print }
+            /CI_EDITOR_SMOKE_DONE/ { exit }
+          ' ci-logs/editor-undo-redo-smoke.log \
+            > ci-logs/editor-undo-redo-window.log
+          grep -Fq "CI_EDITOR_SMOKE_START" ci-logs/editor-undo-redo-window.log
+          grep -Fq "CI_EDITOR_SMOKE_DONE" ci-logs/editor-undo-redo-window.log
+          if grep -En \
+            'ERROR:|SCRIPT ERROR:|Parse Error:|Compile Error:|Inconsistent redo history' \
+            ci-logs/editor-undo-redo-window.log; then
+            echo "EditorUndoRedo smoke emitted in-scope error diagnostics" >&2
+            exit 44
+          fi
+
+          cmp --silent \
+            tools/editor_smoke/fixture.tscn \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn" || {
+              echo "Smoke fixture was not restored byte-for-byte" >&2
+              diff -u \
+                tools/editor_smoke/fixture.tscn \
+                "${smoke_dir}/tools/editor_smoke/fixture.tscn" || true
+              exit 43
+            }
+          if grep -Fq 'AddedByAI' \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn"; then
+            echo "Smoke fixture contains AddedByAI after cleanup" >&2
+            exit 45
+          fi
+          echo "EditorUndoRedo smoke gate passed"
+
+      - name: Verify production project stayed immutable
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- \
+            project.godot \
+            tools/editor_smoke/fixture.tscn \
+            addons/ai_assistant \
+            addons/ai_contract_tests
+
+      - name: Run complete contract self-test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          timeout 240s godot --headless --verbose --path . \
+            --script res://tools/ci_contract_runner.gd \
+            2>&1 | tee ci-logs/contract-tests.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "Contract runner process failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+
+          expected="$(jq -r '.automatic.expected_test_count' release/readiness_manifest.json)"
+          if [[ ! "${expected}" =~ ^[0-9]+$ ]] || [[ "${expected}" -le 0 ]]; then
+            echo "Manifest expected_test_count geçersiz: ${expected}" >&2
+            exit 46
+          fi
+          grep -Fq -- "CI_RELEASE_MANIFEST_OK: ${expected} test bekleniyor ve çalıştı" \
+            ci-logs/contract-tests.log || {
+              echo "Contract manifest completion marker missing" >&2
+              exit 47
+            }
+          grep -Fq -- "CI_CONTRACT_OK: ${expected} test geçti" \
+            ci-logs/contract-tests.log || {
+              echo "Contract success marker missing" >&2
+              exit 48
+            }
+          grep -Fq -- "--- 66 geçti, 0 başarısız (toplam 66) ---" \
+            ci-logs/contract-tests.log || {
+              echo "Adaptive/streaming aggregate package incomplete" >&2
+              exit 49
+            }
+          required_stream_markers=(
+            "✓ reasoning_content ayrı okunur"
+            "✓ content ayrı okunur"
+            "✓ UTF-8 byte byte bölünse de bozulmaz"
+            "✓ V4 Pro isteği stream=true"
+            "✓ Profil SSE reasoning desteğini bildirir"
+            "✓ Reasoning chunk olayı geçerli"
+          )
+          for marker in "${required_stream_markers[@]}"; do
+            grep -Fq -- "${marker}" ci-logs/contract-tests.log || {
+              echo "DeepSeek reasoning stream marker missing: ${marker}" >&2
+              exit 50
+            }
+          done
+          echo "DeepSeek reasoning stream markers passed"
+          echo "Complete contract marker gate passed: ${expected}/${expected}"
+
+      - name: Runtime hygiene gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="ci-logs/contract-tests.log"
+          forbidden=(
+            "Unable to start the timer because it's not inside the scene tree"
+            "ObjectDB instances leaked at exit"
+            "resources still in use at exit"
+          )
+          failed=0
+          for pattern in "${forbidden[@]}"; do
+            if grep -Fn -- "${pattern}" "${log}"; then
+              echo "Runtime hygiene regression detected: ${pattern}" >&2
+              failed=1
+            fi
+          done
+          if [[ ${failed} -ne 0 ]]; then
+            exit 41
+          fi
+          echo "Runtime hygiene gate passed"
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-4.6.3-quality-gate-logs
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 14

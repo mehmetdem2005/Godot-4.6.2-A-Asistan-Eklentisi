@@ -7,7 +7,7 @@ extends RefCounted
 ## Doğrular: log izleyici gerçek hata satırlarını tanır, cursor artımlı
 ## ilerler, dosya rotasyonu sıfırlar; yönlendirici güvensiz yolu
 ## reddeder, devre kesici aynı hatada açılır; thin Node köprüsü
-## başlatılır/durdurulur, pipeline yokken sessiz uyur (sahte iş yok).
+## SceneTree dışında uyarısız bekler, ağaç içinde güvenle başlar/durur.
 ##
 ## Gerçek editör koşusu (Output paneli + LLM onarımı) live verify —
 ## burada DEĞİL (devir §5.4). Burası saf kerneller + glue sağlığı.
@@ -27,6 +27,7 @@ static func run_all() -> Array:
 	results.append(_b("Otonom: Yön", _test_router_same_sig_breaker()))
 	results.append(_b("Otonom: Yön", _test_router_instruction_complete()))
 	results.append(_b("Otonom: Glue", _test_autofix_idle_without_pipeline()))
+	results.append(_b("Otonom: Glue", _test_autofix_detached_waits()))
 	results.append(_b("Otonom: Glue", _test_autofix_start_stop()))
 	return results
 
@@ -178,21 +179,44 @@ static func _test_autofix_idle_without_pipeline() -> Dictionary:
 	return _ok(name)
 
 
-static func _test_autofix_start_stop() -> Dictionary:
-	var name := "AutoFix: pipeline verilince start/stop güvenli"
+static func _test_autofix_detached_waits() -> Dictionary:
+	var name := "AutoFix: SceneTree dışında uyarısız bekler, çalışıyor demez"
 	var pipe := AIPipelineOrchestrator.new()
 	var n := AIEditorLogAutoFix.new()
-	# Node Timer kullandığı için sahneye eklenmeli.
-	var root := Node.new()
-	root.add_child(n)
 	var started: bool = n.start(pipe, "user://__nope__.log")
+	var requested: bool = n.is_start_requested()
+	var active: bool = n.is_active()
+	var t: Array = n.tick()
+	n.stop()
+	var cleared: bool = not n.is_start_requested()
+	n.free()
+	pipe.free()
+	if not started or not requested or active or not t.is_empty() or not cleared:
+		return _fail(name, "detached start talebi/aktiflik sözleşmesi bozuk")
+	return _ok(name)
+
+
+static func _test_autofix_start_stop() -> Dictionary:
+	var name := "AutoFix: gerçek SceneTree içinde start/stop/restart güvenli"
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return _fail(name, "çalışan SceneTree bulunamadı")
+
+	var pipe := AIPipelineOrchestrator.new()
+	var n := AIEditorLogAutoFix.new()
+	tree.root.add_child(n)
+	var started1: bool = n.start(pipe, "user://__nope__.log")
 	var active1: bool = n.is_active()
 	n.stop()
+	var stopped: bool = not n.is_active() and not n.is_start_requested()
+	var started2: bool = n.start(pipe, "user://__nope__.log")
 	var active2: bool = n.is_active()
-	root.free()
+	n.stop()
+	tree.root.remove_child(n)
+	n.free()
 	pipe.free()
-	if not started or not active1 or active2:
-		return _fail(name, "start/stop yaşam döngüsü hatalı")
+	if not started1 or not active1 or not stopped or not started2 or not active2:
+		return _fail(name, "start/stop/restart yaşam döngüsü hatalı")
 	return _ok(name)
 
 

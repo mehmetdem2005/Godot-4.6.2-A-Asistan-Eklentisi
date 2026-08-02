@@ -1,0 +1,5 @@
+[gd_scene format=3 uid="uid://0ktbg7curcn1"]
+
+[node name="AISmokeRoot" type="Node2D" unique_id=2105336482]
+
+[node name="Target" type="Node2D" parent="." unique_id=607181303]

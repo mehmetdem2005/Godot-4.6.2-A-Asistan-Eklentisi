@@ -230,25 +230,42 @@ static func _test_status_and_result() -> Dictionary:
 
 
 # ============================================================
-# MODEL SEÇİMİ (Plan B — Ayarlar)
+# MODEL SEÇİMİ — V4 Pro MAX
 # ============================================================
 
 static func _test_model_default() -> Dictionary:
-	var name := "Varsayılan model deepseek-chat"
+	var name := "Varsayılan model DeepSeek V4 Pro MAX"
 	var c := _c()
-	if c.model_name() != "deepseek-chat":
-		return _fail(name, "varsayılan deepseek-chat olmalı: " +
+	if c.model_name() != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "varsayılan deepseek-v4-pro olmalı: " +
 			c.model_name())
+	if not c.model_display_name().contains("V4 Pro") \
+			or not c.model_display_name().contains("MAX"):
+		return _fail(name, "görünür ad V4 Pro MAX olmalı")
 	return _ok(name)
 
 
 static func _test_model_valid_set() -> Dictionary:
-	var name := "Geçerli model ayarlanır"
+	var name := "V4 Pro MAX seçeneği görünür ve kanonik olarak ayarlanır"
 	var c := _c()
-	if not c.set_model("deepseek-reasoner"):
-		return _fail(name, "izinli model kabul edilmeli")
-	if c.model_name() != "deepseek-reasoner":
-		return _fail(name, "model güncellenmedi")
+	var options: Array = c.model_options()
+	if options.is_empty():
+		return _fail(name, "model seçenekleri boş olamaz")
+	if str(options[0].get("id", "")) != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "ilk seçenek deepseek-v4-pro olmalı")
+	if not str(options[0].get("label", "")).contains("MAX"):
+		return _fail(name, "seçenek etiketi MAX içermeli")
+	if str(options[0].get("id", "")) in AIDeepSeekModelPolicy.LEGACY_MODELS:
+		return _fail(name, "legacy model kullanıcıya gösterilmemeli")
+	if not c.set_model(AIDeepSeekModelPolicy.MODEL_PRO):
+		return _fail(name, "V4 Pro kabul edilmeli")
+	if c.model_name() != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "kanonik model güncellenmedi")
+	# Eski kayıtlar kırılmasın; legacy reasoner görünmeden Pro'ya taşınır.
+	if not c.set_model(AIDeepSeekModelPolicy.LEGACY_REASONER):
+		return _fail(name, "legacy kayıt geriye uyumlu okunmalı")
+	if c.model_name() != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "legacy kayıt V4 Pro'ya normalize edilmeli")
 	return _ok(name)
 
 
@@ -257,8 +274,8 @@ static func _test_model_invalid_rejected() -> Dictionary:
 	var c := _c()
 	if c.set_model("gpt-4"):
 		return _fail(name, "izinsiz model kabul edilmemeli")
-	if c.model_name() != "deepseek-chat":
-		return _fail(name, "ret sonrası model değişmemeli")
+	if c.model_name() != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "ret sonrası V4 Pro korunmalı")
 	return _ok(name)
 
 
