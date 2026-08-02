@@ -70,7 +70,7 @@ Godot 4.6.3, DeepSeek V4, güvenli editör mutasyonu ve Android/dar ekran üreti
 - Faz 5: 869 test
 - Faz 6: 872 test
 - Faz 7: 886 test
-- Faz 8: final sonuç `docs/RELEASE_READINESS.md` ve PR #28'e kaydedilecektir.
+- Faz 8: **896 test** — 10 release-readiness sözleşmesi ve manifest sayı kapısı; Actions run `30745482272`
 
 ### Release öncesi açık kapılar
 
