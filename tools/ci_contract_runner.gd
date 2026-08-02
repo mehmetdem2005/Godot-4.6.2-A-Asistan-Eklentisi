@@ -7,12 +7,13 @@ extends SceneTree
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
 ##
-## Final toplamı beş bağımsız paketten oluşur:
+## Final toplamı altı bağımsız paketten oluşur:
 ##   - ana contract paketi
 ##   - mobil hardening
 ##   - gerçek repo Android audit
 ##   - release readiness manifest/audit
 ##   - DeepSeek V4 Pro maksimum üretim profili
+##   - hiyerarşik AAA ajan organizasyonu
 
 const REQUIRED_MAJOR: int = 4
 const REQUIRED_MINOR: int = 6
@@ -49,12 +50,14 @@ func _execute_validation() -> int:
 	var android_repo_report: Dictionary = AIAndroidRepoAuditTest.build_report()
 	var release_report: Dictionary = AIReleaseReadinessTest.build_report()
 	var deepseek_pro_report: Dictionary = AIDeepSeekProMaxTest.build_report()
+	var organization_report: Dictionary = AIAgentOrganizationTest.build_report()
 	var reports: Array = [
 		core_report,
 		mobile_report,
 		android_repo_report,
 		release_report,
 		deepseek_pro_report,
+		organization_report,
 	]
 	var failed: int = 0
 	var passed: int = 0
