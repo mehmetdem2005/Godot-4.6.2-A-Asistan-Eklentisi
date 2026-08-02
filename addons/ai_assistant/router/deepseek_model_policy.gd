@@ -7,6 +7,10 @@ extends RefCounted
 ## DeepSeek V4'te model kimliği ile düşünme modu birbirinden ayrıdır.
 ## Bu sınıf eski UI/ayar değerlerini geriye uyumlu biçimde kabul eder,
 ## fakat legacy kimliklerin ağ isteğine çıkmasını engeller.
+##
+## ProviderRequest bu sınıfı cache kimliği için kullandığından burada
+## AIProviderRequest sınıfına geri referans verilmez; enum değerleriyle
+## aynı kararlı amaç sabitleri tutulur ve parse bağımlılık döngüsü önlenir.
 
 const MODEL_PRO: String = "deepseek-v4-pro"
 const MODEL_FLASH: String = "deepseek-v4-flash"
@@ -15,6 +19,12 @@ const LEGACY_REASONER: String = "deepseek-reasoner"
 
 const DEFAULT_MODEL: String = MODEL_PRO
 const MAX_OUTPUT_TOKENS: int = 384000
+
+const PURPOSE_REASONING: int = 0
+const PURPOSE_CODE: int = 1
+const PURPOSE_VALIDATION: int = 2
+const PURPOSE_EMBEDDING: int = 3
+const PURPOSE_SUMMARY: int = 4
 
 const CANONICAL_MODELS: Array = [MODEL_PRO, MODEL_FLASH]
 const LEGACY_MODELS: Array = [LEGACY_CHAT, LEGACY_REASONER]
@@ -45,19 +55,13 @@ static func thinking_enabled(requested_model: String, purpose: int) -> bool:
 		return false
 	if model_id == LEGACY_REASONER:
 		return true
-	return purpose in [
-		AIProviderRequest.Purpose.REASONING,
-		AIProviderRequest.Purpose.VALIDATION,
-	]
+	return purpose in [PURPOSE_REASONING, PURPOSE_VALIDATION]
 
 
 ## V4 düşünme eforu. Planlama ve doğrulama ajan işlerinde maksimum,
 ## diğer düşünmeli kullanımlarda yüksek efor yeterlidir.
 static func reasoning_effort(purpose: int) -> String:
-	if purpose in [
-		AIProviderRequest.Purpose.REASONING,
-		AIProviderRequest.Purpose.VALIDATION,
-	]:
+	if purpose in [PURPOSE_REASONING, PURPOSE_VALIDATION]:
 		return "max"
 	return "high"
 
