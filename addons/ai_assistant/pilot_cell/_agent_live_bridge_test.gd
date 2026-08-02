@@ -2,16 +2,15 @@
 class_name AIAgentLiveBridgeTest
 extends RefCounted
 
-## Pilot Cell — Canlı Köprü Self-Test (Aşama 4a).
+## Pilot Cell — Canlı Köprü Self-Test (Aşama 4a/6).
 ##
-## AIAgentLiveBridge'in SENKRON ve saf yüzeyini doğrular: ön koşul
-## kapıları, istek kurulumu (Brain'i değiştirmeden yeniden kullanım),
-## ham HTTP sonucunun ajan-sonucuna eşlenmesi.
+## AIAgentLiveBridge'in senkron ve saf yüzeyini doğrular: ön koşul
+## kapıları, istek kurulumu, ham HTTP sonucunun ajan-sonucuna eşlenmesi
+## ve güvenli sağlayıcı gözlemlenebilirliği.
 ##
-## ÖNEMLİ: Gerçek ağ çağrısı ASENKRON — senkron panele girmez
-## (devir §5.4). Burada finalize_raw'a SAHTE raw beslenir; gerçek
-## DeepSeek kanıtı ayrı headless koşturucudadır (tools/agent_live_runner.gd).
-## Mock policy: sahte raw "başarısız" da test edilir — uydurma cevap yok.
+## Gerçek ağ çağrısı asenkrondur. Burada finalize_raw'a sentetik raw
+## beslenir; gerçek DeepSeek V4 kanıtı tools/deepseek_v4_live_runner.gd
+## ile alınır. Mock policy: başarısız raw sahte başarı üretmez.
 
 
 static func run_all() -> Array:
@@ -28,7 +27,126 @@ static func run_all() -> Array:
 	results.append(_b("LiveBridge: Sohbet", _test_chat_no_router_fails()))
 	results.append(_b("LiveBridge: Sohbet", _test_chat_extra_params_safe()))
 	results.append(_b("LiveBridge: Bölünme", _test_finish_reason_propagated()))
+	results.append(_b("LiveBridge: Metadata", _test_provider_metadata()))
+	results.append(_b("LiveBridge: Metadata", _test_cache_metadata()))
+	results.append(_b("LiveBridge: Güvenlik", _test_error_redacts_secret()))
 	return results
+
+
+static func _test_provider_metadata() -> Dictionary:
+	var name := "V4 başarı sonucu tam sağlayıcı metadata'sı taşır"
+	var bridge := AIAgentLiveBridge.new()
+	bridge.attach_router(AIProviderRouter.new())
+	var req: AIProviderRequest = bridge.build_request_for(
+		AICellRoles.Role.CODE_ENGINEER,
+		"küçük bir fonksiyon yaz",
+		{},
+		AIDeepSeekModelPolicy.MODEL_PRO
+	)
+	var raw: Dictionary = {
+		"ok": true,
+		"status": 200,
+		"json": {
+			"model": AIDeepSeekModelPolicy.MODEL_PRO,
+			"choices": [{
+				"message": {"content": "func test():\n\tpass"},
+				"finish_reason": "stop",
+			}],
+			"usage": {"prompt_tokens": 11, "completion_tokens": 7},
+		},
+		"latency_ms": 123,
+	}
+	var mapped: Dictionary = bridge.finalize_raw(
+		raw, req, AICellRoles.Role.CODE_ENGINEER
+	)
+	bridge.free()
+	if not bool(mapped["ok"]):
+		return _fail(name, "başarı beklenir: " + str(mapped["status_note"]))
+	if int(mapped["provider"]) != AIProviderRequest.Provider.DEEPSEEK:
+		return _fail(name, "provider DeepSeek olmalı")
+	if str(mapped["provider_name"]) != "deepseek":
+		return _fail(name, "provider_name yanlış")
+	if str(mapped["model"]) != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "model kimliği korunmadı")
+	if int(mapped["input_tokens"]) != 11:
+		return _fail(name, "input token korunmadı")
+	if int(mapped["output_tokens"]) != 7:
+		return _fail(name, "output token korunmadı")
+	if int(mapped["total_tokens"]) != 18:
+		return _fail(name, "toplam token yanlış")
+	if str(mapped["finish_reason"]) != "stop":
+		return _fail(name, "finish reason korunmadı")
+	if int(mapped["http_status"]) != 200:
+		return _fail(name, "HTTP durum korunmadı")
+	if int(mapped["latency_ms"]) != 123:
+		return _fail(name, "latency korunmadı")
+	if bool(mapped["from_cache"]):
+		return _fail(name, "canlı yanıt cache sayılmamalı")
+	if str(mapped["request_ref"]) != req.id:
+		return _fail(name, "request_ref korunmadı")
+	return _ok(name)
+
+
+static func _test_cache_metadata() -> Dictionary:
+	var name := "Cache yanıtı from_cache ve model kimliğini taşır"
+	var bridge := AIAgentLiveBridge.new()
+	var response := AIProviderResponse.create_from_cache(
+		"önbellek cevabı",
+		AIProviderRequest.Provider.DEEPSEEK,
+		AIDeepSeekModelPolicy.MODEL_FLASH
+	)
+	response.finish_reason = "stop"
+	response.request_ref = "req_cache_1"
+	var mapped: Dictionary = bridge._result_from_response(
+		AICellRoles.Role.PRODUCT_MANAGER, response
+	)
+	bridge.free()
+	if not bool(mapped["ok"]):
+		return _fail(name, "cache yanıtı kullanılabilir olmalı")
+	if not bool(mapped["from_cache"]):
+		return _fail(name, "from_cache=true taşınmalı")
+	if str(mapped["model"]) != AIDeepSeekModelPolicy.MODEL_FLASH:
+		return _fail(name, "cache model kimliği kayboldu")
+	if str(mapped["request_ref"]) != "req_cache_1":
+		return _fail(name, "cache request_ref kayboldu")
+	return _ok(name)
+
+
+static func _test_error_redacts_secret() -> Dictionary:
+	var name := "401 hata sonucu gizli anahtarı ve ham header'ı taşımaz"
+	var bridge := AIAgentLiveBridge.new()
+	bridge.attach_router(AIProviderRouter.new())
+	var req: AIProviderRequest = bridge.build_request_for(
+		AICellRoles.Role.ARCHITECT,
+		"planla",
+		{},
+		AIDeepSeekModelPolicy.LEGACY_REASONER
+	)
+	var secret := "sk_SUPER_SECRET_SHOULD_NOT_APPEAR"
+	var mapped: Dictionary = bridge.finalize_raw(
+		{
+			"ok": false,
+			"status": 401,
+			"error": "Authorization: Bearer " + secret,
+			"latency_ms": 9,
+		},
+		req,
+		AICellRoles.Role.ARCHITECT
+	)
+	bridge.free()
+	if bool(mapped["ok"]):
+		return _fail(name, "401 başarısız olmalı")
+	if int(mapped["http_status"]) != 401:
+		return _fail(name, "HTTP 401 metadata'da olmalı")
+	if str(mapped["status_note"]).contains(secret):
+		return _fail(name, "gizli anahtar status_note'a sızdı")
+	if str(mapped).contains(secret) or str(mapped).contains("Authorization"):
+		return _fail(name, "ham header sonuç sözlüğüne sızdı")
+	if str(mapped["model"]) != AIDeepSeekModelPolicy.MODEL_PRO:
+		return _fail(name, "legacy model güvenli V4 Pro kimliğine dönmeli")
+	if not str(mapped["content"]).is_empty():
+		return _fail(name, "hata sonucu sahte içerik taşımamalı")
+	return _ok(name)
 
 
 static func _test_finish_reason_propagated() -> Dictionary:
@@ -66,8 +184,6 @@ static func _test_chat_extra_params_safe() -> Dictionary:
 	bridge.thought_completed.connect(func(r: Dictionary) -> void:
 		captured.append(r)
 	)
-	# Geçmiş + proje bağlamı verilse de router yokken sözleşme aynı:
-	# dürüst başarısızlık, sahte içerik yok (geriye uyumlu).
 	var started: bool = bridge.think_chat(
 		"merhaba",
 		"",
@@ -160,7 +276,7 @@ static func _test_no_router_fails() -> Dictionary:
 
 
 # ============================================================
-# İSTEK KURULUMU — Brain'i değiştirmeden yeniden kullanım
+# İSTEK KURULUMU
 # ============================================================
 
 static func _test_build_request() -> Dictionary:
@@ -191,7 +307,7 @@ static func _test_build_request_undefined() -> Dictionary:
 
 
 # ============================================================
-# HAM SONUÇ EŞLEME — sahte raw, gerçek mantık
+# HAM SONUÇ EŞLEME
 # ============================================================
 
 static func _test_finalize_success() -> Dictionary:
@@ -285,7 +401,6 @@ static func _test_finalize_mock_policy() -> Dictionary:
 	var req: AIProviderRequest = bridge.build_request_for(
 		AICellRoles.Role.PRODUCT_MANAGER, "test"
 	)
-	# 200 ama choices yok — sağlayıcı yanıtı kullanılamaz
 	var mapped: Dictionary = bridge.finalize_raw(
 		{"ok": true, "status": 200, "json": {"unexpected": true}},
 		req, AICellRoles.Role.PRODUCT_MANAGER
