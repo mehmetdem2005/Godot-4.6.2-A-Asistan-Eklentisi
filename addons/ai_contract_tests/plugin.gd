@@ -78,11 +78,17 @@ func _run_ci_editor_smoke() -> void:
 		"res://tools/editor_smoke/editor_undo_redo_smoke.gd"
 	)
 	var smoke: EditorScript = SmokeClass.new()
-	smoke._run()
+	var result: Dictionary = smoke.run_smoke()
+	var ok: bool = bool(result.get("ok", false))
+	var message: String = str(result.get("message", "sonuç yok"))
+	if ok:
+		print("SMOKE_OK: " + message)
+	else:
+		printerr("SMOKE_FAIL: " + message)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	print("CI_EDITOR_SMOKE_DONE")
-	await _quit_ci_editor(0)
+	await _quit_ci_editor(0 if ok else 53)
 
 
 func _quit_ci_editor(exit_code: int) -> void:
