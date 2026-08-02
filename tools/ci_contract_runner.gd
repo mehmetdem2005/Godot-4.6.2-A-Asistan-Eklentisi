@@ -7,9 +7,9 @@ extends SceneTree
 ## paketini çalıştırır. Bir test bile başarısızsa süreç sıfır olmayan
 ## çıkış koduyla kapanır; CI sahte başarı üretemez.
 ##
-## Faz 7 mobil sertleştirme paketi ayrı rapor üretir ama ana contract
-## toplamına eklenir. Böylece Android/dar ekran regresyonu da aynı zorunlu
-## kalite kapısını kırar.
+## Faz 7 mobil sertleştirme ve gerçek-repo Android audit paketleri ayrı
+## rapor üretir ama ana contract toplamına eklenir. Böylece responsive
+## veya Android yapılandırma regresyonu aynı zorunlu kapıyı kırar.
 ##
 ## Runtime hygiene: test raporu ve geçici nesneler stack'ten çıktıktan
 ## sonra iki process frame beklenir. Böylece queue_free/deferred cleanup
@@ -50,21 +50,17 @@ func _execute_validation() -> int:
 
 	var core_report: Dictionary = AIContractSelfTest.run_all()
 	var mobile_report: Dictionary = AIMobileHardeningTest.build_report()
-	var failed: int = (
-		int(core_report.get("failed", -1))
-		+ int(mobile_report.get("failed", -1))
-	)
-	var passed: int = (
-		int(core_report.get("passed", 0))
-		+ int(mobile_report.get("passed", 0))
-	)
-
-	if int(core_report.get("failed", -1)) < 0:
-		printerr("CI_CONTRACT_FAIL: self-test geçerli sonuç döndürmedi")
-		return 21
-	if int(mobile_report.get("failed", -1)) < 0:
-		printerr("CI_MOBILE_FAIL: mobil test paketi geçerli sonuç döndürmedi")
-		return 23
+	var repo_report: Dictionary = AIAndroidRepoAuditTest.build_report()
+	var reports: Array = [core_report, mobile_report, repo_report]
+	var failed: int = 0
+	var passed: int = 0
+	for report in reports:
+		var report_failed: int = int(report.get("failed", -1))
+		if report_failed < 0:
+			printerr("CI_CONTRACT_FAIL: test paketi geçerli sonuç döndürmedi")
+			return 21
+		failed += report_failed
+		passed += int(report.get("passed", 0))
 
 	if failed > 0:
 		printerr(
