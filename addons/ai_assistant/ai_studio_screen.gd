@@ -212,9 +212,9 @@ func _apply_responsive_layout() -> void:
 		0, int(_layout_profile.get("input_min_height", 88))
 	)
 	_key_grid.columns = 1 if compact else 2
-	_active_agents_label.visible = not bool(
-		str(_layout_profile.get("title_mode", "full")) == "hidden"
-	)
+	_active_agents_label.visible = str(
+		_layout_profile.get("title_mode", "full")
+	) != "hidden"
 
 
 func layout_profile() -> Dictionary:
@@ -444,14 +444,8 @@ func _verify_and_report_artifact(path: String) -> void:
 func _open_generated_scene(path: String) -> void:
 	if not Engine.is_editor_hint():
 		return
-	var error: int = EditorInterface.open_scene_from_path(path)
-	if error != OK:
-		_append_message(
-			"system",
-			"⚠ Sahne üretildi fakat editörde otomatik açılamadı (kod %d): %s" % [
-				error, path,
-			]
-		)
+	EditorInterface.open_scene_from_path(path)
+	_append_message("system", "Sahne editörde açıldı: " + path)
 
 
 func _on_pipeline_done(result: Dictionary) -> void:
@@ -581,7 +575,11 @@ func _refresh_status() -> void:
 	var model: String = AIDeepSeekModelPolicy.canonical_model(
 		str(summary.get("model", ""))
 	)
-	var state: String = "ÇALIŞIYOR" if _running else ("HAZIR" if has_key else "API ANAHTARI GEREKLİ")
+	var state: String = (
+		"ÇALIŞIYOR"
+		if _running
+		else ("HAZIR" if has_key else "API ANAHTARI GEREKLİ")
+	)
 	_status_label.text = "● %s  ·  Model: %s  ·  %s" % [
 		state,
 		model,
