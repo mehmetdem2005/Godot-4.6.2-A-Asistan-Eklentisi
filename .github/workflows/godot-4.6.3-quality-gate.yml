@@ -118,15 +118,23 @@ jobs:
           fi
           command -v xvfb-run
 
-      - name: Run real EditorUndoRedo smoke
+      - name: Run isolated real EditorUndoRedo smoke
         shell: bash
         env:
           AI_EDITOR_SMOKE: "1"
         run: |
           set -euo pipefail
+          smoke_dir="${RUNNER_TEMP}/ai-editor-smoke-project"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='ci-logs/' \
+            "${GITHUB_WORKSPACE}/" "${smoke_dir}/"
+
           set +e
           timeout 120s xvfb-run -a -s "-screen 0 1280x720x24" \
-            godot --editor --path . --quit-after 300 --verbose \
+            godot --editor --path "${smoke_dir}" --quit-after 300 --verbose \
             --rendering-method gl_compatibility --audio-driver Dummy \
             2>&1 | tee ci-logs/editor-undo-redo-smoke.log
           godot_status=${PIPESTATUS[0]}
@@ -157,17 +165,32 @@ jobs:
             echo "EditorUndoRedo smoke emitted in-scope error diagnostics" >&2
             exit 44
           fi
+
+          cmp --silent \
+            tools/editor_smoke/fixture.tscn \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn" || {
+              echo "Smoke fixture was not restored byte-for-byte" >&2
+              diff -u \
+                tools/editor_smoke/fixture.tscn \
+                "${smoke_dir}/tools/editor_smoke/fixture.tscn" || true
+              exit 43
+            }
+          if grep -Fq 'AddedByAI' \
+            "${smoke_dir}/tools/editor_smoke/fixture.tscn"; then
+            echo "Smoke fixture contains AddedByAI after cleanup" >&2
+            exit 45
+          fi
           echo "EditorUndoRedo smoke gate passed"
 
-      - name: Verify fixture remains clean
+      - name: Verify production project stayed immutable
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code -- tools/editor_smoke/fixture.tscn
-          if grep -Fq 'AddedByAI' tools/editor_smoke/fixture.tscn; then
-            echo "Smoke fixture contains AddedByAI after cleanup" >&2
-            exit 43
-          fi
+          git diff --exit-code -- \
+            project.godot \
+            tools/editor_smoke/fixture.tscn \
+            addons/ai_assistant \
+            addons/ai_contract_tests
 
       - name: Run complete contract self-test suite
         shell: bash
