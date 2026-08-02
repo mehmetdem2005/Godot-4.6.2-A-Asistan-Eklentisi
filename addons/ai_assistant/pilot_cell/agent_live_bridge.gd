@@ -2,26 +2,24 @@
 class_name AIAgentLiveBridge
 extends Node
 
-## AgentLiveBridge — Pilot Cell ↔ Router CANLI köprüsü (Aşama 4a).
+## AgentLiveBridge — Pilot Cell ↔ Router CANLI köprüsü (Aşama 4a/6).
 ##
-## SORUN (devir ADIM 2a): AIAgentBrain.think() SENKRONdur — _router.route()
-## çağırıp anında "response" bekler. Ama gerçek ağ çağrısı ASENKRONdur
-## (AIHTTPTransport sinyal-tabanlı). route() ağ gereken durumda
-## {resolved:false, needs_network:true, response:null} döndürür; bu
-## yüzden senkron Brain canlı modda HİÇBİR zaman gerçek cevap alamaz —
-## hep NEEDS_LLM döner. provider_router.gd yorumundaki "route_async"
-## hiç yazılmamıştı.
+## AIAgentBrain.think() senkrondur; gerçek HTTP çağrısı ise asenkrondur.
+## Bu Node, Brain'in hazırladığı ProviderRequest'i Router → Transport →
+## Adapter hattından geçirir ve sonucu sinyalle döndürür.
 ##
-## ÇÖZÜM: Mevcut hiçbir dosyayı değiştirmeyen ince bir köprü Node'u.
-## Brain'in zaten ürettiği prepared_request'i alır, live_connection_test
-## ile birebir aynı kanıtlanmış asenkron deseni (route → send_post →
-## handle_response) bir ajan için genelleştirir. Sonuç sinyalle gelir.
+## Faz 6: yalnız metin değil, üretimde tanı ve maliyet hesabı için gereken
+## güvenli sağlayıcı metadata'sı da sonuç sözleşmesine taşınır. API anahtarı,
+## Authorization başlığı ve ham hassas istek/yanıt gövdeleri sonuçlara girmez.
 ##
 ## Mock policy: ağ/anahtar yoksa veya sağlayıcı hata dönerse açık
 ## başarısızlık yayılır — sahte ajan çıktısı ÜRETİLMEZ.
 
 ## Bir ajan canlı düşünme sonucu.
-## result: {ok, role, role_name, content, llm_called, latency_ms, status_note}
+## result alanları:
+## {ok, role, role_name, content, llm_called, latency_ms, status_note,
+##  finish_reason, provider, provider_name, model, input_tokens,
+##  output_tokens, total_tokens, from_cache, http_status, request_ref}
 signal thought_completed(result: Dictionary)
 
 ## İlerleme bildirimi (UI için).
@@ -68,10 +66,10 @@ func attach_transport(transport: AIHTTPTransport) -> void:
 
 
 ## Bir rol + görev için AIProviderRequest kurar.
-## Brain'i HİÇ değiştirmeden onun kendi kurulumunu yeniden kullanır:
+## Brain'i değiştirmeden onun kendi kurulumunu yeniden kullanır:
 ## think(live_mode=false) zaten prepared_request döndürür.
-## model: boş değilse istek o belirli modele sabitlenir (UI model seçimi);
-## boş = router/adapter varsayılanını kullanır (geriye uyumlu).
+## model: boş değilse istek o belirli modele sabitlenir;
+## boş = router/adapter varsayılanını kullanır.
 func build_request_for(
 	role: int, task: String, context: Dictionary = {},
 	model: String = ""
@@ -86,7 +84,6 @@ func build_request_for(
 
 ## Bir ajan rolü için CANLI düşünme başlatır (asenkron).
 ## Sonuç 'thought_completed' sinyali ile gelir — bu fonksiyon beklemez.
-## Dönen: başlatılabildi mi (false = ön koşul hatası, sinyal yine yayılır).
 func think_live(
 	role: int, task: String, context: Dictionary = {},
 	model: String = ""
@@ -108,10 +105,7 @@ func think_live(
 
 
 ## Doğal SOHBET cevabı için CANLI çağrı (asenkron). Kod hattı değil:
-## Verifier/HITL/Executor YOK — düz konuşma yanıtı döner.
-## Sohbet/kod ayrımı kullanıcıyı "syntactic" hatasına boğmasın diye.
-## history: önceki konuşma turları [{role, content}] (eski→yeni) —
-## çok-turlu hafıza. Boş = eski stateless davranış (geriye uyumlu).
+## Verifier/HITL/Executor yok — düz konuşma yanıtı döner.
 func think_chat(
 	message: String, model: String = "", history: Array = [],
 	project_context: String = ""
@@ -155,8 +149,7 @@ func think_chat(
 
 
 ## Konuşma geçmişini isteğe ekler (sistem promptu sonrası, güncel
-## kullanıcı mesajından önce). Yalnız user/assistant turları; bozuk
-## girdiler sessizce atlanır (geriye uyumlu — boş history etkisiz).
+## kullanıcı mesajından önce). Yalnız user/assistant turları alınır.
 func _append_history(request: AIProviderRequest, history: Array) -> void:
 	for turn in history:
 		if typeof(turn) != TYPE_DICTIONARY:
@@ -171,7 +164,6 @@ func _append_history(request: AIProviderRequest, history: Array) -> void:
 
 
 ## Hazır bir isteği yönlendirir (cache/ağ) ve sonucu sinyalle döndürür.
-## think_live ve think_chat ortak asenkron çekirdeği — kanıtlanmış desen.
 func _dispatch(request: AIProviderRequest, role: int) -> bool:
 	_active_request = request
 	_active_role = role
@@ -179,16 +171,21 @@ func _dispatch(request: AIProviderRequest, role: int) -> bool:
 
 	var routed: Dictionary = _router.route(request)
 
-	# Cache hit veya hazırlık hatası — anında çözüldü
+	# Cache hit veya hazırlık hatası — anında çözüldü.
 	if bool(routed["resolved"]):
 		var resp: AIProviderResponse = routed["response"]
 		if resp != null and resp.is_usable():
-			_emit_ok(role, resp.content, 0)
+			_emit_provider_response(role, resp)
 		else:
 			var msg: String = "Router isteği hazırlayamadı"
 			if resp != null and not resp.error_message.is_empty():
 				msg = resp.error_message
-			_emit_fail(role, msg)
+			var failure: Dictionary = _result_dict(
+				false, role, "", msg, 0
+			)
+			if resp != null:
+				failure = _with_response_metadata(failure, resp)
+			_emit_result(failure)
 		return true
 
 	if not bool(routed["needs_network"]):
@@ -221,35 +218,33 @@ func _on_net_result(raw_result: Dictionary) -> void:
 	var mapped: Dictionary = finalize_raw(
 		raw_result, _active_request, _active_role
 	)
-	if bool(mapped["ok"]):
-		_emit_ok(_active_role, str(mapped["content"]),
-			int(mapped["latency_ms"]))
-	else:
-		_emit_fail(_active_role, str(mapped["status_note"]),
-			int(mapped["latency_ms"]))
+	_emit_result(mapped)
 
 
 ## Ham HTTP sonucunu ajan-sonuç sözleşmesine çevirir.
-## SENKRON ve saf — gerçek ağ olmadan test edilebilir (sahte raw verilir).
-## provider: bu sürümde DeepSeek (router fallback zinciri yönetir).
+## Senkron ve saf — gerçek ağ olmadan test edilebilir.
 func finalize_raw(
 	raw_result: Dictionary, request: AIProviderRequest, role: int
 ) -> Dictionary:
 	var latency: int = int(raw_result.get("latency_ms", 0))
+	var status: int = int(raw_result.get("status", 0))
 
 	if not bool(raw_result.get("ok", false)):
 		var net_err: String = str(raw_result.get("error", "?"))
-		var status: int = int(raw_result.get("status", 0))
 		if status == 401:
 			net_err = "API anahtarı reddedildi (401)"
 		elif status == 429:
 			net_err = "İstek limiti aşıldı (429)"
-		return _result_dict(false, role, "", net_err, latency)
+		var network_failure: Dictionary = _result_dict(
+			false, role, "", net_err, latency
+		)
+		return _with_request_metadata(network_failure, request, status)
 
 	if _router == null:
-		return _result_dict(
+		var router_failure: Dictionary = _result_dict(
 			false, role, "", "Router yok — yanıt çözülemez", latency
 		)
+		return _with_request_metadata(router_failure, request, status)
 
 	var handled: Dictionary = _router.handle_response(
 		raw_result, request, AIProviderRequest.Provider.DEEPSEEK
@@ -259,10 +254,14 @@ func finalize_raw(
 		var reason: String = "Sağlayıcı yanıtı kullanılamadı"
 		if response != null and not response.error_message.is_empty():
 			reason = response.error_message
-		return _result_dict(false, role, "", reason, latency)
+		var provider_failure: Dictionary = _result_dict(
+			false, role, "", reason, latency
+		)
+		if response != null:
+			return _with_response_metadata(provider_failure, response)
+		return _with_request_metadata(provider_failure, request, status)
 
-	return _result_dict(true, role, response.content, "LLM cevabı alındı",
-		latency, response.finish_reason)
+	return _result_from_response(role, response)
 
 
 ## Köprü durumu — test ve UI için.
@@ -275,7 +274,7 @@ func bridge_status() -> Dictionary:
 
 
 # ============================================================
-# İÇ YARDIMCILAR
+# SONUÇ + METADATA YARDIMCILARI
 # ============================================================
 
 func _result_dict(
@@ -290,18 +289,79 @@ func _result_dict(
 		"llm_called": true,
 		"latency_ms": latency,
 		"status_note": note,
-		# "length" = sağlayıcı tavanında kesildi → bölünmüş üretim için.
 		"finish_reason": finish_reason,
+		"provider": -1,
+		"provider_name": "",
+		"model": "",
+		"input_tokens": 0,
+		"output_tokens": 0,
+		"total_tokens": 0,
+		"from_cache": false,
+		"http_status": 0,
+		"request_ref": "",
 	}
 
 
-func _emit_ok(role: int, content: String, latency: int) -> void:
-	thought_completed.emit(
-		_result_dict(true, role, content, "LLM cevabı alındı", latency)
+func _result_from_response(
+	role: int, response: AIProviderResponse
+) -> Dictionary:
+	var result: Dictionary = _result_dict(
+		true,
+		role,
+		response.content,
+		"LLM cevabı alındı",
+		response.latency_ms,
+		response.finish_reason
 	)
+	return _with_response_metadata(result, response)
+
+
+func _with_response_metadata(
+	result: Dictionary, response: AIProviderResponse
+) -> Dictionary:
+	result["provider"] = response.provider
+	result["provider_name"] = str(
+		AIProviderRequest.PROVIDER_NAMES.get(response.provider, "unknown")
+	)
+	result["model"] = response.model
+	result["input_tokens"] = response.input_tokens
+	result["output_tokens"] = response.output_tokens
+	result["total_tokens"] = response.total_tokens()
+	result["from_cache"] = response.from_cache
+	result["finish_reason"] = response.finish_reason
+	result["http_status"] = response.http_status
+	result["latency_ms"] = response.latency_ms
+	result["request_ref"] = response.request_ref
+	return result
+
+
+## Ağ seviyesi hata henüz ProviderResponse üretmediğinde yalnız güvenli
+## istek kimliğini taşır. Anahtar, header ve ham gövde asla eklenmez.
+func _with_request_metadata(
+	result: Dictionary, request: AIProviderRequest, http_status: int
+) -> Dictionary:
+	result["http_status"] = http_status
+	if request == null:
+		return result
+	result["provider"] = request.provider
+	result["provider_name"] = request.provider_name()
+	result["request_ref"] = request.id
+	if request.provider == AIProviderRequest.Provider.DEEPSEEK:
+		result["model"] = AIDeepSeekModelPolicy.canonical_model(request.model)
+	else:
+		result["model"] = request.model
+	return result
+
+
+func _emit_provider_response(role: int, response: AIProviderResponse) -> void:
+	_emit_result(_result_from_response(role, response))
+
+
+func _emit_result(result: Dictionary) -> void:
+	thought_completed.emit(result)
 
 
 func _emit_fail(role: int, note: String, latency: int = 0) -> void:
-	var d: Dictionary = _result_dict(false, role, "", note, latency)
-	d["llm_called"] = false
-	thought_completed.emit(d)
+	var result: Dictionary = _result_dict(false, role, "", note, latency)
+	result["llm_called"] = false
+	_emit_result(result)
