@@ -48,20 +48,16 @@ func _on_panel_closed() -> void:
 
 
 ## CI-only gerçek editör smoke akışı.
-## Plugin'in yüklenmesi ile sahne kökünün hazır olması aynı frame'e denk
-## gelmediğinden birkaç frame beklenir. Harness tamamlandıktan sonra logun
-## diske akması için iki frame daha verilir.
+## open_scene_from_path() Godot 4.6.3'te void döndürür; başarı, editörün
+## gerçek edited_scene_root değeriyle doğrulanır. Plugin'in yüklenmesi ile
+## sahne kökünün hazır olması aynı frame'e denk gelmediğinden beklenir.
 func _run_ci_editor_smoke() -> void:
 	if _ci_smoke_started:
 		return
 	_ci_smoke_started = true
 	print("CI_EDITOR_SMOKE_START")
 
-	var open_error: int = EditorInterface.open_scene_from_path(FIXTURE_SCENE)
-	if open_error != OK:
-		printerr("SMOKE_FAIL: Fixture açılamadı: %d" % open_error)
-		await _quit_ci_editor(51)
-		return
+	EditorInterface.open_scene_from_path(FIXTURE_SCENE)
 
 	var root: Node = null
 	for _attempt in range(120):
@@ -74,10 +70,7 @@ func _run_ci_editor_smoke() -> void:
 		await _quit_ci_editor(52)
 		return
 
-	var SmokeClass := preload(
-		"res://tools/editor_smoke/editor_undo_redo_smoke.gd"
-	)
-	var smoke: EditorScript = SmokeClass.new()
+	var smoke := AIEditorUndoRedoSmoke.new()
 	var result: Dictionary = smoke.run_smoke()
 	var ok: bool = bool(result.get("ok", false))
 	var message: String = str(result.get("message", "sonuç yok"))
