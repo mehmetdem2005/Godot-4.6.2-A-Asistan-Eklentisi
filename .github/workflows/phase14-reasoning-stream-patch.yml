@@ -1,0 +1,43 @@
+name: Phase 14 Reasoning Stream Patch
+
+on:
+  push:
+    branches:
+      - "agent/phase-14-deepseek-reasoning-stream"
+    paths:
+      - "tools/phase14_apply_patch.py"
+      - ".github/workflows/phase14-reasoning-stream-patch.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase14-reasoning-stream-patch
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Phase 14 branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/phase-14-deepseek-reasoning-stream
+          fetch-depth: 0
+
+      - name: Apply exact integration patch
+        run: python3 tools/phase14_apply_patch.py
+
+      - name: Commit patched product files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git commit -m "Stream DeepSeek reasoning and answer deltas in the editor"
+          git push origin HEAD:agent/phase-14-deepseek-reasoning-stream
