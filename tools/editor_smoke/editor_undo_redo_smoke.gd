@@ -77,6 +77,10 @@ func run_smoke() -> Dictionary:
 			results.size()
 		)
 
+	# Cleanup undo'ları redo yığını bırakır. Kaydetmeden önce yalnız bu
+	# izole fixture geçmişini temizlemek, Godot'un tutarsız redo geçmişi
+	# tanısını önler ve gerçek oyun sahnelerinin geçmişine dokunmaz.
+	manager.clear_history(history_id, false)
 	var save_error: int = EditorInterface.save_scene()
 	if save_error != OK:
 		return _result(
