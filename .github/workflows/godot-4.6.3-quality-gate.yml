@@ -108,6 +108,16 @@ jobs:
             exit 40
           fi
 
+      - name: Ensure virtual desktop is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xvfb-run >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          command -v xvfb-run
+
       - name: Run real EditorUndoRedo smoke
         shell: bash
         env:
@@ -115,7 +125,8 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          timeout 120s godot --headless --editor --path . --quit-after 300 --verbose \
+          timeout 120s xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --editor --path . --quit-after 300 --verbose \
             2>&1 | tee ci-logs/editor-undo-redo-smoke.log
           godot_status=${PIPESTATUS[0]}
           set -e
@@ -129,6 +140,12 @@ jobs:
           if grep -Fq "SMOKE_FAIL:" ci-logs/editor-undo-redo-smoke.log; then
             echo "EditorUndoRedo smoke failure marker detected" >&2
             exit 42
+          fi
+          if grep -En \
+            'ERROR:|SCRIPT ERROR:|Parse Error:|Compile Error:|Inconsistent redo history' \
+            ci-logs/editor-undo-redo-smoke.log; then
+            echo "EditorUndoRedo smoke emitted error diagnostics" >&2
+            exit 44
           fi
           echo "EditorUndoRedo smoke gate passed"
 
