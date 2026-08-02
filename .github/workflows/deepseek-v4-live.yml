@@ -1,0 +1,131 @@
+name: DeepSeek V4 Pro Max Live Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepseek-v4-pro-max-live-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.6.3"
+  GODOT_TAG: "4.6.3-stable"
+  GODOT_ASSET: "Godot_v4.6.3-stable_linux.x86_64.zip"
+
+jobs:
+  live-provider-gate:
+    name: Real DeepSeek V4 Pro Max E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Require repository secret
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DEEPSEEK_API_KEY}" ]]; then
+            echo "DEEPSEEK_API_KEY repository secret is required" >&2
+            exit 60
+          fi
+          echo "DeepSeek secret is configured"
+
+      - name: Download pinned Godot release and verify digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(curl --fail --silent --show-error --location --retry 3 \
+            "https://api.github.com/repos/godotengine/godot/releases/tags/${GODOT_TAG}")"
+          asset_url="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .browser_download_url' <<<"${release_json}")"
+          asset_digest="$(jq -r --arg name "${GODOT_ASSET}" \
+            '.assets[] | select(.name == $name) | .digest' <<<"${release_json}")"
+
+          if [[ -z "${asset_url}" || "${asset_url}" == "null" ]]; then
+            echo "Godot asset not found: ${GODOT_ASSET}" >&2
+            exit 61
+          fi
+          if [[ ! "${asset_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Valid Godot SHA-256 digest was not returned" >&2
+            exit 62
+          fi
+
+          curl --fail --silent --show-error --location --retry 3 \
+            "${asset_url}" --output godot.zip
+          echo "${asset_digest#sha256:}  godot.zip" | sha256sum --check --strict
+          unzip -q godot.zip -d "${RUNNER_TEMP}/godot-release"
+          binary="${RUNNER_TEMP}/godot-release/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          install -D -m 0755 "${binary}" "${RUNNER_TEMP}/bin/godot"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify exact engine version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(godot --version)"
+          echo "Godot version: ${version}"
+          [[ "${version}" == 4.6.3.stable* ]]
+
+      - name: Run real V4 Pro maximum-profile request
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          set +e
+          timeout 1900s godot --headless --path . \
+            --script res://tools/deepseek_v4_live_runner.gd \
+            2>&1 | tee ci-logs/deepseek-v4-live.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "DeepSeek live runner failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+          grep -Fq "V4_MAX_PROFILE_OK" ci-logs/deepseek-v4-live.log
+          grep -Fq "V4_LIVE_OK" ci-logs/deepseek-v4-live.log
+          if grep -Eq 'V4_LIVE_FAILED|V4_LIVE_TIMEOUT|V4_LIVE_START_FAILED' \
+            ci-logs/deepseek-v4-live.log; then
+            echo "DeepSeek live failure marker detected" >&2
+            exit 63
+          fi
+
+      - name: Secret leakage check for live log
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          secret = os.environ.get("DEEPSEEK_API_KEY", "")
+          text = Path("ci-logs/deepseek-v4-live.log").read_text(
+              encoding="utf-8", errors="replace"
+          )
+          if secret and secret in text:
+              raise SystemExit("DeepSeek API key leaked into live log")
+          forbidden = ("Authorization: Bearer ", "api_key=")
+          for marker in forbidden:
+              if marker in text:
+                  raise SystemExit(f"Sensitive marker leaked into live log: {marker}")
+          print("Live log secret leakage gate passed")
+          PY
+
+      - name: Upload sanitized live evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-v4-pro-max-live-evidence
+          path: ci-logs/deepseek-v4-live.log
+          if-no-files-found: warn
+          retention-days: 14
