@@ -29,7 +29,7 @@ Karar: Manuel kapılar tamamlandıktan sonra yalnız Faz 8 PR'ı varsayılan dal
 | 5 — DeepSeek V4 geçişi | #22 | tamamlandı | Faz 6 runner ile birleşik |
 | 6 — canlı V4 ve metadata | #24 | tamamlandı | `V4_LIVE_OK` |
 | 7 — Android/mobile hardening | #26 | tamamlandı | `ANDROID_SMOKE_OK: 6/6` |
-| 8 — release konsolidasyonu | #28 | CI sonrası tamamlanır | final kullanıcı birleşme kararı |
+| 8 — release konsolidasyonu | #28 | otomatik kapsam tamamlandı | final kullanıcı birleşme kararı |
 
 ## 3. Otomatik kanıt geçmişi
 
@@ -39,7 +39,7 @@ Karar: Manuel kapılar tamamlandıktan sonra yalnız Faz 8 PR'ı varsayılan dal
 | 5 | `30744499528` | 869/869 | 7 V4 sözleşmesi |
 | 6 | `30744736885` | 872/872 | metadata/redaksiyon |
 | 7 | `30745093568` | 886/886 | 12 mobil + 2 gerçek repo audit |
-| 8 | PR #28 CI | manifestteki final sayı | release-readiness audit |
+| 8 | `30745482272` | 896/896 | 10 release-readiness + manifest sayı kapısı |
 
 Her CI koşusu şu ortak kapıları içerir:
 
@@ -141,4 +141,4 @@ Release sonrası kritik regresyonda:
 
 ## 9. Release kararı
 
-Otomatik geliştirme kapsamı tamamlanabilir; ancak release/merge kararı manuel kapılar ve kullanıcı onayı olmadan tamamlanmış sayılmaz.
+Sekiz fazın otomatik geliştirme ve doğrulama kapsamı tamamlandı. Release candidate yine de üç manuel kapı ve açık kullanıcı birleşme kararı olmadan üretim sürümü veya birleşmeye hazır sayılmaz.
