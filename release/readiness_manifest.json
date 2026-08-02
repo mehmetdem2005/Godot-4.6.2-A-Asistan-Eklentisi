@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "release": {
+    "name": "AI Asistan",
+    "version": "1.1.0-rc.1",
+    "channel": "release-candidate",
+    "godot_version": "4.6.3",
+    "default_branch": "claude/godot-ai-game-builder-FRhQk",
+    "consolidation_branch": "agent/phase-08-release-consolidation",
+    "strategy": "single_consolidation_pr",
+    "merge_ready": false,
+    "rollback_ref": "d9565c48f756420f2fd93e2aad773cf23d530d81"
+  },
+  "automatic": {
+    "expected_test_count": 896,
+    "gates": {
+      "secret_leakage": true,
+      "architecture_invariants": true,
+      "plugin_parse_compile": true,
+      "contract_suite": true,
+      "runtime_hygiene": true,
+      "android_repo_audit": true,
+      "deepseek_v4_contracts": true
+    }
+  },
+  "phases": [
+    {
+      "number": 1,
+      "name": "Godot 4.6.3 güvenlik ve uyumluluk denetimi",
+      "branch": "agent/godot-4-6-3-phase-1-safety-audit",
+      "base": "claude/godot-ai-game-builder-FRhQk",
+      "pr": 14,
+      "automatic_complete": true
+    },
+    {
+      "number": 2,
+      "name": "Editör mutasyon çekirdeği",
+      "branch": "agent/phase-02-editor-mutation-core-fix",
+      "base": "claude/godot-ai-game-builder-FRhQk",
+      "pr": 16,
+      "automatic_complete": true
+    },
+    {
+      "number": 3,
+      "name": "Godot 4.6.3 kalite kapısı ve CI",
+      "branch": "agent/phase-03-godot-4-6-3-quality-gate",
+      "base": "agent/phase-02-editor-mutation-core-fix",
+      "pr": 18,
+      "automatic_complete": true
+    },
+    {
+      "number": 4,
+      "name": "Runtime hygiene ve editör Undo/Redo smoke harness",
+      "branch": "agent/phase-04-runtime-hygiene-editor-smoke",
+      "base": "agent/phase-03-godot-4-6-3-quality-gate",
+      "pr": 20,
+      "automatic_complete": true
+    },
+    {
+      "number": 5,
+      "name": "DeepSeek V4 backend geçişi",
+      "branch": "agent/phase-05-deepseek-v4-backend-migration",
+      "base": "agent/phase-04-runtime-hygiene-editor-smoke",
+      "pr": 22,
+      "automatic_complete": true
+    },
+    {
+      "number": 6,
+      "name": "Canlı V4 E2E ve sağlayıcı gözlemlenebilirliği",
+      "branch": "agent/phase-06-live-provider-observability",
+      "base": "agent/phase-05-deepseek-v4-backend-migration",
+      "pr": 24,
+      "automatic_complete": true
+    },
+    {
+      "number": 7,
+      "name": "Android ve dar ekran üretim sertleştirmesi",
+      "branch": "agent/phase-07-android-mobile-hardening",
+      "base": "agent/phase-06-live-provider-observability",
+      "pr": 26,
+      "automatic_complete": true
+    },
+    {
+      "number": 8,
+      "name": "Sürüm konsolidasyonu ve birleşme hazırlığı",
+      "branch": "agent/phase-08-release-consolidation",
+      "base": "agent/phase-07-android-mobile-hardening",
+      "pr": 28,
+      "automatic_complete": false
+    }
+  ],
+  "manual_gates": [
+    {
+      "id": "editor_undo_redo",
+      "phase": 4,
+      "status": "pending",
+      "evidence_marker": "SMOKE_OK: 3/3 smoke testi geçti",
+      "procedure": "tools/editor_smoke/README.md"
+    },
+    {
+      "id": "deepseek_v4_live",
+      "phase": 6,
+      "status": "pending",
+      "evidence_marker": "V4_LIVE_OK",
+      "procedure": "tools/DEEPSEEK_V4_LIVE_TEST.md"
+    },
+    {
+      "id": "android_editor",
+      "phase": 7,
+      "status": "pending",
+      "evidence_marker": "ANDROID_SMOKE_OK: 6/6",
+      "procedure": "tools/ANDROID_EDITOR_SMOKE.md"
+    }
+  ],
+  "open_risks": [
+    "Canlı EditorUndoRedoManager davranışı gerçek masaüstü editörde henüz kanıtlanmadı.",
+    "DeepSeek V4 Pro gerçek anahtarlı canlı çağrı kanıtı henüz eklenmedi.",
+    "Android Godot 4.6.3 editör responsive ve klavye smoke kanıtı henüz eklenmedi."
+  ]
+}
