@@ -196,9 +196,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set +e
           timeout 240s godot --headless --verbose --path . \
             --script res://tools/ci_contract_runner.gd \
             2>&1 | tee ci-logs/contract-tests.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${godot_status} -ne 0 ]]; then
+            echo "Contract runner process failed: ${godot_status}" >&2
+            exit "${godot_status}"
+          fi
+
+          expected="$(jq -r '.automatic.expected_test_count' release/readiness_manifest.json)"
+          if [[ ! "${expected}" =~ ^[0-9]+$ ]] || [[ "${expected}" -le 0 ]]; then
+            echo "Manifest expected_test_count geçersiz: ${expected}" >&2
+            exit 46
+          fi
+          grep -Fq -- "CI_RELEASE_MANIFEST_OK: ${expected} test bekleniyor ve çalıştı" \
+            ci-logs/contract-tests.log || {
+              echo "Contract manifest completion marker missing" >&2
+              exit 47
+            }
+          grep -Fq -- "CI_CONTRACT_OK: ${expected} test geçti" \
+            ci-logs/contract-tests.log || {
+              echo "Contract success marker missing" >&2
+              exit 48
+            }
+          grep -Fq -- "=== DeepSeek Reasoning Stream Test Sonuçları ===" \
+            ci-logs/contract-tests.log || {
+              echo "DeepSeek reasoning stream test report missing" >&2
+              exit 49
+            }
+          grep -Fq -- "--- 14 geçti, 0 başarısız (toplam 14) ---" \
+            ci-logs/contract-tests.log || {
+              echo "DeepSeek reasoning stream test package incomplete" >&2
+              exit 50
+            }
+          echo "Complete contract marker gate passed: ${expected}/${expected}"
 
       - name: Runtime hygiene gate
         shell: bash
