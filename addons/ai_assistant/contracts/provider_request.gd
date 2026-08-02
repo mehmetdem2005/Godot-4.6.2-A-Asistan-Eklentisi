@@ -53,9 +53,8 @@ var purpose: int = Purpose.REASONING
 var system_prompt: String = ""
 var messages: Array = []             ## [{role: "user"|"assistant", content: String}]
 var temperature: float = 0.7
-## Çıktı token tavanı — kullanıcı isteğiyle 100000 (yapay sınır yok).
-## NOT: gerçek tavan sağlayıcıdadır; adapter kendi API maksimumuna
-## (DeepSeek: 8192) GÜVENLE kırpar — yoksa API isteği reddeder.
+## İstenen çıktı token tavanı. Gerçek üst sınır sağlayıcı/model adapter'ı
+## tarafından uygulanır (DeepSeek V4: 384K); yapay küçük bir ortak tavan yok.
 var max_tokens: int = 100000
 
 # --- Sahiplik ---
@@ -100,10 +99,15 @@ func add_message(role: String, content: String) -> void:
 
 
 ## Önbellek anahtarını hesaplar — aynı istek aynı anahtar üretir.
-## provider + model + system_prompt + messages + temperature birleşiminden.
+## Amaç ve DeepSeek düşünme modu da kimliğe dahildir; aynı V4 modelinin
+## düşünmeli/düşünmesiz sonuçları birbirinin cache kaydını kullanamaz.
 func compute_cache_key() -> String:
-	var canonical: String = "%s|%s|%s|temp:%s" % [
-		provider_name(), model, system_prompt, str(temperature)
+	var model_key: String = model
+	if provider == Provider.DEEPSEEK:
+		model_key = AIDeepSeekModelPolicy.cache_discriminator(model, purpose)
+	var canonical: String = "%s|%s|purpose:%s|%s|temp:%s" % [
+		provider_name(), model_key, purpose_name(), system_prompt,
+		str(temperature)
 	]
 	for m in messages:
 		canonical += "|%s:%s" % [m.get("role", ""), m.get("content", "")]

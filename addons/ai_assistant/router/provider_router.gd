@@ -53,7 +53,9 @@ func _init() -> void:
 
 ## 4 sağlayıcı adapter'ını kaydeder.
 func _register_adapters() -> void:
-	var deepseek := AIDeepSeekAdapter.new()
+	# Canlı DeepSeek trafiği yalnız V4 adapter üzerinden çıkar. Eski
+	# AIDeepSeekAdapter sınıfı geriye uyumlu contract yüzeyi olarak kalır.
+	var deepseek := AIDeepSeekV4Adapter.new()
 	var openai := AIOpenAIAdapter.new()
 	var anthropic := AIAnthropicAdapter.new()
 	var gemini := AIGeminiAdapter.new()
