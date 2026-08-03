@@ -1,28 +1,27 @@
 name: Apply Unified Stream Hotfix
 
 on:
-  push:
+  pull_request:
     branches:
-      - "agent/hotfix-unified-stream-null"
-    paths:
-      - "tools/apply_unified_stream_hotfix.py"
-      - ".github/workflows/apply-unified-stream-hotfix.yml"
+      - "claude/godot-ai-game-builder-FRhQk"
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-unified-stream-hotfix
+  group: apply-unified-stream-hotfix-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout hotfix branch
         uses: actions/checkout@v4
         with:
-          ref: agent/hotfix-unified-stream-null
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       - name: Apply exact hotfix
@@ -41,6 +40,4 @@ jobs:
             exit 0
           fi
           git commit -m "Fix unified stream timeline and null SSE chunks"
-          git push origin HEAD:agent/hotfix-unified-stream-null
-
-# Trigger revision: 1
+          git push origin HEAD:${GITHUB_HEAD_REF}
