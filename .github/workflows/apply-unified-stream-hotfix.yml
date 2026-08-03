@@ -1,0 +1,44 @@
+name: Apply Unified Stream Hotfix
+
+on:
+  push:
+    branches:
+      - "agent/hotfix-unified-stream-null"
+    paths:
+      - "tools/apply_unified_stream_hotfix.py"
+      - ".github/workflows/apply-unified-stream-hotfix.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-unified-stream-hotfix
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/hotfix-unified-stream-null
+          fetch-depth: 0
+
+      - name: Apply exact hotfix
+        run: python3 tools/apply_unified_stream_hotfix.py
+
+      - name: Commit production changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Fix unified stream timeline and null SSE chunks"
+          git push origin HEAD:agent/hotfix-unified-stream-null
