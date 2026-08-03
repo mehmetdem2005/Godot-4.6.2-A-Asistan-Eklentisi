@@ -166,17 +166,25 @@ func _process_sse_events(events: Array) -> void:
 
 func _process_stream_json(chunk_json: Dictionary) -> void:
 	if chunk_json.has("model"):
-		_model = str(chunk_json.get("model", _model))
+		var model_text: String = _stream_text(chunk_json.get("model", null))
+		if not model_text.is_empty():
+			_model = model_text
 	var usage_value: Variant = chunk_json.get("usage", null)
 	if usage_value is Dictionary:
 		_usage = (usage_value as Dictionary).duplicate(true)
-	var choices: Array = chunk_json.get("choices", []) as Array
-	if choices.is_empty():
+	var choices_value: Variant = chunk_json.get("choices", [])
+	if not choices_value is Array:
+		return
+	var choices: Array = choices_value as Array
+	if choices.is_empty() or not choices[0] is Dictionary:
 		return
 	var choice: Dictionary = choices[0] as Dictionary
-	var delta: Dictionary = choice.get("delta", {}) as Dictionary
-	var reasoning: String = str(delta.get("reasoning_content", ""))
-	var content: String = str(delta.get("content", ""))
+	var delta_value: Variant = choice.get("delta", {})
+	if not delta_value is Dictionary:
+		return
+	var delta: Dictionary = delta_value as Dictionary
+	var reasoning: String = _stream_text(delta.get("reasoning_content", null))
+	var content: String = _stream_text(delta.get("content", null))
 	if not reasoning.is_empty():
 		_reasoning_content += reasoning
 		stream_delta.emit("reasoning", reasoning, {
@@ -189,9 +197,20 @@ func _process_stream_json(chunk_json: Dictionary) -> void:
 			"model": _model,
 			"content_chars": _answer_content.length(),
 		})
-	var finish_value: Variant = choice.get("finish_reason", null)
-	if finish_value != null and not str(finish_value).is_empty():
-		_finish_reason = str(finish_value)
+	var finish_text: String = _stream_text(choice.get("finish_reason", null))
+	if not finish_text.is_empty():
+		_finish_reason = finish_text
+
+
+func _stream_text(value: Variant) -> String:
+	if value == null:
+		return ""
+	if typeof(value) != TYPE_STRING and typeof(value) != TYPE_STRING_NAME:
+		return ""
+	var text: String = str(value)
+	if text in ["<null>", "null", "Null", "NULL"]:
+		return ""
+	return text
 
 
 func _finish_from_connection_end() -> void:

@@ -53,6 +53,10 @@ var _reasoning_log: RichTextLabel = null
 var _answer_stream_log: RichTextLabel = null
 var _reasoning_stream_key: String = ""
 var _answer_stream_key: String = ""
+var _timeline_stream_key: String = ""
+var _live_reasoning_text: String = ""
+var _live_answer_text: String = ""
+var _answer_streamed: bool = false
 var _key_grid: GridContainer = null
 var _key_edit: LineEdit = null
 var _key_save_btn: Button = null
@@ -98,9 +102,11 @@ func _build_ui() -> void:
 	_settings_panel.visible = false
 	_root_layout.add_child(_settings_panel)
 
-	_stream_panel = _build_stream_panel()
-	_stream_panel.visible = false
-	_root_layout.add_child(_stream_panel)
+	# Düşünme, ana yanıt, ajan olayları ve görevler tek RichTextLabel
+	# zaman çizelgesinde akar. Ayrı stream panelleri oluşturulmaz.
+	_stream_panel = null
+	_reasoning_log = null
+	_answer_stream_log = null
 
 	_chat_log = RichTextLabel.new()
 	_chat_log.bbcode_enabled = false
@@ -476,37 +482,53 @@ func _on_chat_stream(kind: String, text: String, _metadata: Dictionary) -> void:
 
 
 func _append_stream_chunk(kind: String, text: String, label: String) -> void:
-	if text.is_empty() or _stream_panel == null:
+	var clean_text: String = _safe_stream_text(text)
+	if clean_text.is_empty() or _chat_log == null:
 		return
-	_stream_panel.visible = true
-	var target: RichTextLabel = (
-		_reasoning_log if kind == "reasoning" else _answer_stream_log
-	)
-	if target == null:
-		return
-	var current_key: String = (
-		_reasoning_stream_key if kind == "reasoning" else _answer_stream_key
-	)
-	if current_key != label:
-		if target.get_parsed_text().length() > 0:
-			target.add_text("\n\n")
-		target.add_text("[" + label + "]\n")
-		if kind == "reasoning":
-			_reasoning_stream_key = label
-		else:
-			_answer_stream_key = label
-	target.add_text(text)
+	var normalized_kind: String = "reasoning" if kind == "reasoning" else "content"
+	var block_key: String = normalized_kind + "::" + label
+	if _timeline_stream_key != block_key:
+		if _chat_log.get_parsed_text().length() > 0:
+			_chat_log.add_text("\n")
+		var title: String = "Düşünme" if normalized_kind == "reasoning" else "AI Yanıt"
+		var color := (
+			Color(0.77, 0.53, 0.84)
+			if normalized_kind == "reasoning"
+			else Color(0.31, 0.79, 0.69)
+		)
+		_chat_log.push_color(color)
+		_chat_log.push_bold()
+		_chat_log.add_text("%s — %s:" % [title, label])
+		_chat_log.pop()
+		_chat_log.pop()
+		_chat_log.add_text("\n")
+		_timeline_stream_key = block_key
+	if normalized_kind == "reasoning":
+		_reasoning_stream_key = label
+		_live_reasoning_text += clean_text
+	else:
+		_answer_stream_key = label
+		_live_answer_text += clean_text
+		_answer_streamed = true
+	_chat_log.add_text(clean_text)
+
+
+func _safe_stream_text(value: Variant) -> String:
+	if value == null:
+		return ""
+	var clean_text: String = str(value)
+	if clean_text in ["<null>", "null", "Null", "NULL"]:
+		return ""
+	return clean_text
 
 
 func _clear_stream_panels() -> void:
 	_reasoning_stream_key = ""
 	_answer_stream_key = ""
-	if _reasoning_log != null:
-		_reasoning_log.clear()
-	if _answer_stream_log != null:
-		_answer_stream_log.clear()
-	if _stream_panel != null:
-		_stream_panel.visible = false
+	_timeline_stream_key = ""
+	_live_reasoning_text = ""
+	_live_answer_text = ""
+	_answer_streamed = false
 
 
 func _on_tasks_updated(registry: Array) -> void:
@@ -576,7 +598,15 @@ func _on_pipeline_done(result: Dictionary) -> void:
 	_ctrl.record_result(result)
 	var stage: String = str(result.get("stage", "?"))
 	if stage == "chat":
-		_append_message("assistant", str(result.get("message", "")))
+		var final_message: String = str(result.get("message", ""))
+		if _answer_streamed:
+			# Final metin zaten token token tek zaman çizelgesine yazıldı.
+			# Yalnız konuşma geçmişine kaydet; ekranda ikinci kez basma.
+			_ctrl.add_message("assistant", final_message)
+			if _chat_log != null:
+				_chat_log.add_text("\n\n")
+		else:
+			_append_message("assistant", final_message)
 	else:
 		var ok: bool = bool(result.get("ok", false))
 		var message: String = ("✓ " if ok else "✗ ") + str(
@@ -603,7 +633,11 @@ func _on_pipeline_done(result: Dictionary) -> void:
 
 func _append_message(role: String, text: String) -> void:
 	_ctrl.add_message(role, text)
-	_redraw_chat()
+	# Tam redraw canlı token metnini silerdi. Yeni mesajı aynı tek
+	# zaman çizelgesine artımlı olarak ekle.
+	if _chat_log != null:
+		_timeline_stream_key = ""
+		_draw_message(role, text)
 
 
 func _redraw_chat() -> void:
